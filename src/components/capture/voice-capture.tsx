@@ -430,7 +430,7 @@ function CaptureCard({ row, today, onChange, onApprove, onEdit, onDismiss }: Cap
             {item.dueDay === today ? "Today" : shortDay(item.dueDay)}
           </span>
         )}
-        {item.kind === "note" && item.tag && <span className="rounded-full border border-line-strong px-2 py-px text-[11.5px] normal-case">{item.tag}</span>}
+        {item.tag && (item.kind === "note" || (item.kind === "task" && item.tag !== "Ideas")) && <span className="rounded-full border border-line-strong px-2 py-px text-[11.5px] normal-case">{item.tag}</span>}
       </p>
 
       {editing ? (

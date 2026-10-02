@@ -7,6 +7,7 @@ import { isDayKey, longDay } from "@/lib/life/days";
 import { listHabits, setDone } from "@/lib/life/habits";
 import { appendToEntry } from "@/lib/life/journal";
 import { createNote, NOTE_TAGS, type NoteTag } from "@/lib/life/notes";
+import { isTaskArea } from "@/lib/life/task-rules";
 import { addTask } from "@/lib/life/tasks";
 
 // Voice capture: Atlas turns what you said into suggested items; nothing is saved
@@ -70,7 +71,16 @@ export async function saveCaptureItem(item: CaptureSuggestion, today: string) {
   switch (item.kind) {
     case "task":
       if (!title) return { ok: false as const };
-      await addTask(title, isDayKey(item.dueDay) ? item.dueDay : null, "voice");
+      await addTask({
+        title,
+        dueDay: isDayKey(item.dueDay) ? item.dueDay : null,
+        area: isTaskArea(item.tag) ? item.tag : null,
+        priority: false,
+        notes: "",
+        repeat: null,
+        threadId: null,
+        source: "voice",
+      });
       return { ok: true as const };
     case "note":
       if (!title && !body) return { ok: false as const };

@@ -43,9 +43,34 @@ create table if not exists tasks (
   title text not null,
   due_day text,
   done_at bigint,
-  source text not null,               -- 'voice', 'manual', ...
+  source text not null,               -- 'voice', 'manual', 'email', 'repeat'
   created_at bigint not null
 );
+-- Added with the Tasks page (re-runnable on older databases).
+alter table tasks add column if not exists area text;                  -- Bricklaying, Henty Lodge, Trading or Home
+alter table tasks add column if not exists priority boolean not null default false;
+alter table tasks add column if not exists notes text not null default '';
+alter table tasks add column if not exists thread_id text;             -- the email it came from
+alter table tasks add column if not exists repeat text;                -- daily, weekly, monthly, quarterly or yearly
+alter table tasks add column if not exists next_id text;               -- the repeat made when this one was ticked
+alter table tasks add column if not exists deleted_at bigint;          -- deleted, kept briefly so Undo works
+create index if not exists tasks_due on tasks (due_day) where done_at is null and deleted_at is null;
+
+-- Tasks Atlas spotted while sorting email, waiting for Approve / Edit / Dismiss.
+-- Keyed like triage, so a dismissed suggestion never comes back for that email.
+create table if not exists task_suggestions (
+  key text primary key,
+  thread_id text not null,
+  title text not null,
+  due_day text,
+  area text,
+  email_from text not null default '',
+  email_headline text not null default '',
+  status text not null default 'pending',   -- pending, approved or dismissed
+  task_id text,
+  created_at bigint not null
+);
+create index if not exists task_suggestions_thread on task_suggestions (thread_id);
 
 create table if not exists settings (
   key text primary key,
@@ -129,3 +154,4 @@ alter table drafts enable row level security;
 alter table overrides enable row level security;
 alter table google_account enable row level security;
 alter table push_subscriptions enable row level security;
+alter table task_suggestions enable row level security;

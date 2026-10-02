@@ -4,7 +4,7 @@ import { ALL_SECTIONS } from "@/lib/nav";
 
 // Placeholder for every sidebar section that isn't built yet. Built ones have their own routes.
 
-const BUILT = ["brief", "inbox", "calendar", "journal", "habits", "notes"];
+const BUILT = ["brief", "inbox", "calendar", "journal", "habits", "notes", "tasks"];
 
 export const dynamicParams = false;
 

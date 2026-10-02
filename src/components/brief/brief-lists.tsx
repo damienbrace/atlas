@@ -1,11 +1,12 @@
 "use client";
 
-import { Check, Plus } from "lucide-react";
+import { Check, ChevronRight, Flag, Plus } from "lucide-react";
+import Link from "next/link";
 import { useState, type FormEvent } from "react";
-import { createTask, markTask } from "@/app/(app)/brief/actions";
 import { markHabit } from "@/app/(app)/habits/actions";
+import { createTask, markTask } from "@/app/(app)/tasks/actions";
 import { useToast } from "@/components/toast";
-import { shortDay } from "@/lib/life/days";
+import { addDays, shortDay } from "@/lib/life/days";
 import type { Habit } from "@/lib/life/habits";
 import type { Task } from "@/lib/life/tasks";
 
@@ -58,7 +59,10 @@ export function BriefHabits({ habits, done: initial, today }: { habits: Habit[];
   );
 }
 
-/** Open tasks with a quick-add line. Ticked tasks stay until tomorrow, struck through. */
+/**
+ * Overdue, today's and the next few days' tasks, with a quick-add line (due today).
+ * Ticked tasks stay until tomorrow, struck through; the full list is on the Tasks page.
+ */
 export function BriefTasks({ tasks: initial, today }: { tasks: Task[]; today: string }) {
   const toast = useToast();
   const [tasks, setTasks] = useState(initial);
@@ -70,8 +74,14 @@ export function BriefTasks({ tasks: initial, today }: { tasks: Task[]; today: st
     const res = await markTask(task.id, !task.done).catch(() => ({ ok: false as const }));
     if (!res.ok) {
       flip(task.done);
-      toast({ message: "Couldn't update that task" });
+      return toast({ message: "Couldn't update that task" });
     }
+    // A repeating task's next one shows here if it's due soon; unticking takes it away again.
+    const { next, removedId } = res;
+    setTasks((all) => [
+      ...all.filter((t) => t.id !== removedId),
+      ...(next?.dueDay && next.dueDay <= addDays(today, 3) ? [next] : []),
+    ]);
   }
 
   async function add(e: FormEvent) {
@@ -79,12 +89,12 @@ export function BriefTasks({ tasks: initial, today }: { tasks: Task[]; today: st
     const title = draft.trim();
     if (!title) return;
     setDraft("");
-    const res = await createTask(title, null).catch(() => ({ ok: false as const }));
-    if (!res.ok || !("id" in res)) {
+    const res = await createTask({ title, dueDay: today }).catch(() => ({ ok: false as const }));
+    if (!res.ok) {
       setDraft(title);
       return toast({ message: "Couldn't add that task" });
     }
-    setTasks((all) => [...all, { id: res.id, title, dueDay: null, done: false }]);
+    setTasks((all) => [...all, res.task]);
   }
 
   return (
@@ -108,7 +118,10 @@ export function BriefTasks({ tasks: initial, today }: { tasks: Task[]; today: st
                   {t.done && <Check className="size-3.5 text-canvas" strokeWidth={3} />}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className={`block text-[15px] ${t.done ? "text-muted line-through decoration-faint" : ""}`}>{t.title}</span>
+                  <span className={`block text-[15px] ${t.done ? "text-muted line-through decoration-faint" : ""}`}>
+                    {t.priority && !t.done && <Flag aria-label="Flagged" className="mr-1.5 inline size-3.5 -translate-y-px fill-current text-ink-soft" />}
+                    {t.title}
+                  </span>
                   {t.dueDay && !t.done && (
                     <span className={`text-[12.5px] ${overdue ? "text-red" : t.dueDay === today ? "text-amber" : "text-faint"}`}>
                       {overdue ? `Overdue · ${shortDay(t.dueDay)}` : t.dueDay === today ? "Due today" : shortDay(t.dueDay)}
@@ -125,12 +138,15 @@ export function BriefTasks({ tasks: initial, today }: { tasks: Task[]; today: st
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="Add a task"
-          aria-label="Add a task"
+          placeholder="Add a task for today"
+          aria-label="Add a task for today"
           maxLength={200}
           className="h-10 min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-faint"
         />
       </form>
+      <Link href="/tasks" className="mt-1 flex items-center gap-1 px-2 py-1.5 text-[13.5px] font-medium text-muted hover:text-ink">
+        See all tasks <ChevronRight className="size-4" />
+      </Link>
     </div>
   );
 }

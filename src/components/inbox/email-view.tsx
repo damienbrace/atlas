@@ -12,6 +12,7 @@ import { CATEGORIES, LABELS } from "@/lib/inbox/categories";
 import type { Email } from "@/lib/inbox/types";
 import { useHydrated } from "@/lib/use-hydrated";
 import { EmailFrame } from "./email-frame";
+import { EmailTask } from "./email-task";
 import { useEmailBody } from "./use-email-body";
 import { counterpart, type InboxState } from "./use-inbox";
 
@@ -56,6 +57,8 @@ export function EmailView({ inbox }: { inbox: InboxState }) {
           <p className="text-[15.5px] leading-relaxed text-ink">{email.summary}</p>
         </section>
       )}
+      {/* Live Gmail only: make a task from it, or approve the one Atlas spotted. */}
+      {inbox.live && <EmailTask key={`task-${email.id}`} email={email} />}
       {/* Keyed so each email starts in its default view. */}
       <EmailBody key={`body-${email.id}`} email={email} live={inbox.live} />
     </article>

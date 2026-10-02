@@ -175,7 +175,7 @@ export function Notes({ notes: initial, tags, emailConnected, openNoteId }: Note
           </div>
           <p className="mt-2 px-1 text-[12.5px] text-faint">
             Typing filters your notes. Press Enter to ask Atlas, which answers from your notes
-            {emailConnected ? " and the last 3 months of email" : ""}.
+            {emailConnected ? " and the last year of email" : ""}.
           </p>
         </form>
 

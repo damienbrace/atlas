@@ -1,6 +1,8 @@
 import "server-only";
 import { sql, textList } from "@/lib/db";
-import type { Category, Label, Tone } from "@/lib/inbox/types";
+import type { Category, Email, Label, Tone } from "@/lib/inbox/types";
+import { suggestionsForThreads } from "@/lib/life/task-suggestions";
+import { tasksForThreads } from "@/lib/life/tasks";
 
 // What Atlas has written about mail: its read of each thread, the drafts it has
 // written, and the sorting corrections I make. Stored in Supabase beside the mail.
@@ -31,21 +33,29 @@ export interface Annotations {
   drafts: Record<string, StoredDraft>;
   /** Keyed by thread id; survives new messages. */
   overrides: Record<string, Override>;
+  /** Keyed by thread id: a task made from the thread, and a suggestion waiting on one. */
+  tasks: Record<string, NonNullable<Email["task"]>>;
+  suggestions: Record<string, NonNullable<Email["taskSuggestion"]>>;
 }
 
 /** Everything Atlas has noted for these threads: `keys` are triage keys, `threadIds` the threads. */
 export async function annotationsFor(keys: string[], threadIds: string[]): Promise<Annotations> {
-  const [triage, drafts, overrides] = await Promise.all([
+  const [triage, drafts, overrides, tasks, suggestions] = await Promise.all([
     keys.length ? sql<{ key: string; data: Triage }[]>`SELECT key, data FROM triage WHERE key = ANY (${textList(keys)})` : [],
     keys.length ? sql<{ key: string; data: StoredDraft }[]>`SELECT key, data FROM drafts WHERE key = ANY (${textList(keys)})` : [],
     threadIds.length
       ? sql<{ thread_id: string; data: Override }[]>`SELECT thread_id, data FROM overrides WHERE thread_id = ANY (${textList(threadIds)})`
       : [],
+    tasksForThreads(threadIds),
+    suggestionsForThreads(threadIds),
   ]);
   return {
     triage: Object.fromEntries(triage.map((r) => [r.key, r.data])),
     drafts: Object.fromEntries(drafts.map((r) => [r.key, r.data])),
     overrides: Object.fromEntries(overrides.map((r) => [r.thread_id, r.data])),
+    // Newest task first, so the newest wins per thread.
+    tasks: Object.fromEntries(tasks.toReversed().map((t) => [t.threadId!, { id: t.id, title: t.title, done: t.done }])),
+    suggestions: Object.fromEntries(suggestions.map((s) => [s.threadId, { key: s.key, title: s.title, dueDay: s.dueDay, area: s.area }])),
   };
 }
 

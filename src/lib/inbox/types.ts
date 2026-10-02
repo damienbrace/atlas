@@ -1,3 +1,4 @@
+import type { TaskArea } from "@/lib/life/task-rules";
 /** "unsorted" = live mail older than the fortnight Atlas sorts; it gets no category pill. */
 export type Category = "action" | "waiting" | "fyi" | "receipts" | "unsorted";
 
@@ -49,6 +50,10 @@ export interface Email {
   repliedAt?: string;
   myReply?: string;
   draft?: DraftSuggestion;
+  /** A task already made from this thread. */
+  task?: { id: string; title: string; done: boolean };
+  /** A task Atlas spotted in this thread, waiting for Approve / Edit / Dismiss. */
+  taskSuggestion?: { key: string; title: string; dueDay: string | null; area: TaskArea | null };
 }
 
 export type InboxStatus = "ok" | "expired" | "error";

@@ -6,6 +6,7 @@ import { aiConfigured } from "@/lib/env";
 import { GmailClient, GmailHttpError, Pacer } from "@/lib/gmail/client";
 import { GmailAuthExpiredError } from "@/lib/gmail/oauth";
 import { parseMessage, type ParsedThread } from "@/lib/gmail/parse";
+import { saveSuggestions } from "@/lib/life/task-suggestions";
 import { annotationsFor, saveTriage } from "@/lib/store";
 import {
   clearMail,
@@ -236,13 +237,58 @@ async function sortRecent(keepLock: () => void, late: () => boolean) {
       return;
     }
     // Outside the try: a database error isn't Claude's, and fails the sync with its own log line.
-    await saveTriage(
-      round.flatMap((t) => {
-        const triage = results.get(t.id);
-        return triage ? [{ key: triageKey(t), threadId: t.id, triage }] : [];
-      }),
-    );
+    await saveRound(round, results);
     await setState("sorting_left", Math.max(0, todo.length - i - round.length));
     keepLock();
   }
+}
+
+/** Saves Claude's read of a round of threads, and any tasks it spotted as suggestions. Returns how many. */
+async function saveRound(round: ParsedThread[], results: Awaited<ReturnType<typeof triageThreads>>) {
+  const read = round.flatMap((t) => {
+    const result = results.get(t.id);
+    return result ? [{ thread: t, ...result }] : [];
+  });
+  await saveTriage(read.map(({ thread, triage }) => ({ key: triageKey(thread), threadId: thread.id, triage })));
+  const suggestions = read.flatMap(({ thread, triage, task }) =>
+    task
+      ? [
+          {
+            key: triageKey(thread),
+            threadId: thread.id,
+            ...task,
+            emailFrom: thread.messages.findLast((m) => !m.sentByMe)?.from.name ?? "",
+            emailHeadline: triage.headline,
+          },
+        ]
+      : [],
+  );
+  await saveSuggestions(suggestions);
+  return suggestions.length;
+}
+
+/**
+ * One-off: re-reads recent threads that were sorted before Atlas looked for tasks, so
+ * the suggestions start full. Only threads sorted into `categories` (e.g. action, receipts).
+ */
+export async function lookBackForTasks(categories: string[], budgetMs: number) {
+  const deadline = Date.now() + budgetMs;
+  const recent = await listThreads({ since: Date.now() - SORT_DAYS * DAY_MS, limit: 2000, bodyChars: 12_000 });
+  const { triage } = await annotationsFor(recent.map(triageKey), []);
+  const done = new Set((await getState("lookback_done"))?.split(" ") ?? []);
+  const todo = recent.filter((t) => {
+    const read = triage[triageKey(t)];
+    return read && categories.includes(read.category) && !done.has(t.id);
+  });
+  let suggested = 0;
+  let looked = 0;
+  for (let i = 0; i < todo.length && Date.now() < deadline; i += TRIAGE_ROUND) {
+    const round = todo.slice(i, i + TRIAGE_ROUND);
+    suggested += await saveRound(round, await triageThreads(round));
+    looked += round.length;
+    // Remember progress so a second run carries on rather than paying twice.
+    round.forEach((t) => done.add(t.id));
+    await setState("lookback_done", [...done].join(" "));
+  }
+  return { candidates: todo.length, looked, suggested };
 }

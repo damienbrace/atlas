@@ -27,7 +27,7 @@ export const SECTIONS: Section[] = [
   { slug: "calendar", label: "Calendar", icon: CalendarDays, blurb: "Site visits, calls and bookings in one view." },
   { slug: "journal", label: "Journal", icon: NotebookPen, blurb: "A page a day, in your own words." },
   { slug: "habits", label: "Habits", icon: Flame, blurb: "Daily habits, ticked off and kept as streaks." },
-  { slug: "tasks", label: "Tasks", icon: SquareCheck, blurb: "Tasks and promises caught from email and voice notes." },
+  { slug: "tasks", label: "Tasks", icon: SquareCheck, blurb: "Everything to do, from typing, voice notes and email." },
   { slug: "notes", label: "Notes", icon: FileText, blurb: "Notes and voice memos, searchable in plain English." },
   { slug: "money", label: "Money", icon: ChartColumn, blurb: "Net position, spending by business, bills and subscriptions." },
   { slug: "decisions", label: "Decisions", icon: GitFork, blurb: "Big calls logged with a prediction, scored six months later." },

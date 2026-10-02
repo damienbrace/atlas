@@ -37,8 +37,8 @@ function SyncLine({ sync, ai }: { sync: SyncProgress; ai: boolean }) {
   if (sync.downloading) {
     text =
       sync.estimate > sync.stored
-        ? `Downloading 3 months of mail · ${count(sync.stored)} of about ${count(sync.estimate)}`
-        : `Downloading 3 months of mail · ${count(sync.stored)} so far`;
+        ? `Downloading a year of mail · ${count(sync.stored)} of about ${count(sync.estimate)}`
+        : `Downloading a year of mail · ${count(sync.stored)} so far`;
   } else if (ai && sync.sortingLeft > 0) {
     text = `Atlas is sorting the last 2 weeks · ${count(sync.sortingLeft)} to go`;
   }

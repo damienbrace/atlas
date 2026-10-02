@@ -9,7 +9,7 @@ import { addDays, dayKey } from "@/lib/life/days";
 import { habitsData, type Habit } from "@/lib/life/habits";
 import { listEntries } from "@/lib/life/journal";
 import { getSetting } from "@/lib/life/settings";
-import { listTasks, type Task } from "@/lib/life/tasks";
+import { briefTasks, type Task } from "@/lib/life/tasks";
 import { isBriefSection, type BriefSection } from "@/lib/brief-sections";
 import { firstPage } from "@/lib/mail/inbox";
 import { startSync, syncStatus } from "@/lib/mail/sync";
@@ -74,7 +74,7 @@ export async function buildBrief(session: { email: string; refreshToken: string;
     session ? syncStatus() : Promise.resolve(null),
     habitsData(today),
     listEntries(),
-    listTasks(todayStart),
+    briefTasks(today, todayStart),
     getSetting<unknown[]>("brief.hidden", []),
   ]);
 

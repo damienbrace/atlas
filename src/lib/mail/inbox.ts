@@ -24,9 +24,10 @@ function notesFor(threads: ParsedThread[]) {
 function toEmails(threads: ParsedThread[], notes: Annotations, includeArchived = false) {
   const now = Date.now();
   return threads
-    .map((t) => {
+    .map((t): Email | null => {
       const key = triageKey(t);
-      return toEmail(t, notes.triage[key], notes.overrides[t.id], notes.drafts[key], now, includeArchived);
+      const email = toEmail(t, notes.triage[key], notes.overrides[t.id], notes.drafts[key], now, includeArchived);
+      return email && { ...email, task: notes.tasks[t.id], taskSuggestion: notes.suggestions[t.id] };
     })
     .filter((e): e is Email => e !== null);
 }
