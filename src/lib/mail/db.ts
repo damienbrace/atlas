@@ -112,13 +112,8 @@ export async function messageBody(id: string) {
 
 /** Forgets the mail and everything Atlas wrote about it (on disconnect or account change). */
 export async function clearMail() {
-  await sql.begin(async (tx) => {
-    await tx`DELETE FROM messages`;
-    await tx`DELETE FROM sync_state`;
-    await tx`DELETE FROM triage`;
-    await tx`DELETE FROM drafts`;
-    await tx`DELETE FROM overrides`;
-  });
+  // Several statements in one simple query run as a single transaction (no sql.begin: see db.ts).
+  await sql.unsafe("DELETE FROM messages; DELETE FROM sync_state; DELETE FROM triage; DELETE FROM drafts; DELETE FROM overrides;");
 }
 
 // ---- Threads ----------------------------------------------------------------

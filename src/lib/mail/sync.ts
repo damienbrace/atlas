@@ -227,19 +227,21 @@ async function sortRecent(keepLock: () => void, late: () => boolean) {
 
   for (let i = 0; i < todo.length && !late(); i += TRIAGE_ROUND) {
     const round = todo.slice(i, i + TRIAGE_ROUND);
+    let results: Awaited<ReturnType<typeof triageThreads>>;
     try {
-      const results = await triageThreads(round);
-      await saveTriage(
-        round.flatMap((t) => {
-          const triage = results.get(t.id);
-          return triage ? [{ key: triageKey(t), threadId: t.id, triage }] : [];
-        }),
-      );
+      results = await triageThreads(round);
     } catch (error) {
       console.error("[atlas] triage failed", error);
       await setState("triage_problem", describeAiError(error));
       return;
     }
+    // Outside the try: a database error isn't Claude's, and fails the sync with its own log line.
+    await saveTriage(
+      round.flatMap((t) => {
+        const triage = results.get(t.id);
+        return triage ? [{ key: triageKey(t), threadId: t.id, triage }] : [];
+      }),
+    );
     await setState("sorting_left", Math.max(0, todo.length - i - round.length));
     keepLock();
   }

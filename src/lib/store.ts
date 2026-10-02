@@ -49,15 +49,14 @@ export async function annotationsFor(keys: string[], threadIds: string[]): Promi
   };
 }
 
+/** One statement for the whole round (no sql.begin: see db.ts on max_pipeline). */
 export async function saveTriage(entries: { key: string; threadId: string; triage: Triage }[]) {
   if (entries.length === 0) return;
-  await sql.begin(async (tx) => {
-    for (const e of entries) {
-      await tx`
-        INSERT INTO triage (key, thread_id, data) VALUES (${e.key}, ${e.threadId}, ${tx.json(e.triage as never)})
-        ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data`;
-    }
-  });
+  const rows = entries.map((e) => ({ key: e.key, thread_id: e.threadId, data: e.triage }));
+  await sql`
+    INSERT INTO triage (key, thread_id, data)
+    SELECT key, thread_id, data FROM jsonb_to_recordset(${sql.json(rows as never)}) AS t (key text, thread_id text, data jsonb)
+    ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data`;
 }
 
 export async function getDraft(key: string) {

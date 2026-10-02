@@ -13,6 +13,8 @@ function connect() {
     prepare: false,
     // One query at a time per connection: Supavisor's transaction mode stalls when a
     // query is queued behind one with a large result on the same connection.
+    // This also breaks sql.begin (its BEGIN lands on any connection), so never use
+    // sql.begin or sql.reserve here: write one statement, or several in one sql.unsafe.
     // @ts-expect-error postgres.js supports max_pipeline (src/index.js) but its types leave it out.
     max_pipeline: 0,
     max: 5,
