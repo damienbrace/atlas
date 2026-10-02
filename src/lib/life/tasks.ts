@@ -68,6 +68,15 @@ export async function briefTasks(today: string, todayStart: number, days = 3, li
   return rows.map(toTask);
 }
 
+/** Tasks with a due date, open or ticked in the last `doneDays` days: the calendar's week list. */
+export async function datedTasks(doneDays: number) {
+  const doneSince = Date.now() - doneDays * 86_400_000;
+  const rows = await sql<Row[]>`
+    SELECT * FROM tasks WHERE deleted_at IS NULL AND due_day IS NOT NULL AND (done_at IS NULL OR done_at >= ${doneSince})
+    ORDER BY due_day, priority DESC, created_at`;
+  return rows.map(toTask);
+}
+
 /** Open tasks due today or earlier (the 5pm nudge). */
 export async function dueOpenTasks(today: string) {
   const rows = await sql<Row[]>`

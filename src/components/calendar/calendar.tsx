@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { calendarFor } from "@/lib/calendar/calendars";
 import { rangeLabel, weekOf } from "@/lib/calendar/dates";
 import type { CalendarSource, View } from "@/lib/calendar/types";
+import type { Task } from "@/lib/life/tasks";
 import { useHydrated } from "@/lib/use-hydrated";
 import { DayPanel } from "./day-panel";
 import { EventDetails } from "./event-details";
@@ -12,6 +13,7 @@ import { EventSearch } from "./event-search";
 import { MonthView } from "./month-view";
 import { TimeGrid } from "./time-grid";
 import { useCalendar, type CalendarState } from "./use-calendar";
+import { WeekList } from "./week-list";
 
 const VIEWS: { id: View; label: string }[] = [
   { id: "day", label: "Day" },
@@ -26,13 +28,13 @@ const toolButton =
  * Month grid with the selected day's agenda and Atlas's suggestion beside it.
  * Below 1280px the agenda drops under the grid and the page scrolls.
  */
-export function Calendar() {
+export function Calendar({ tasks }: { tasks: Task[] }) {
   // Everything here depends on the viewer's clock and time zone, so it renders after hydration.
   const hydrated = useHydrated();
-  return hydrated ? <CalendarScreen /> : <CalendarSkeleton />;
+  return hydrated ? <CalendarScreen tasks={tasks} /> : <CalendarSkeleton />;
 }
 
-function CalendarScreen() {
+function CalendarScreen({ tasks }: { tasks: Task[] }) {
   const cal = useCalendar();
   const { editor } = cal;
 
@@ -45,14 +47,25 @@ function CalendarScreen() {
         <section
           aria-label={rangeLabel(cal.view, cal.date)}
           className={`flex min-w-0 flex-col overflow-hidden rounded-2xl border border-line bg-panel xl:min-h-0 xl:flex-1 ${
-            cal.view === "month" ? "" : "h-[72dvh] min-h-[28rem] xl:h-auto"
+            cal.view === "month" ? "" : cal.view === "week" ? "md:h-[72dvh] md:min-h-[28rem] xl:h-auto" : "h-[72dvh] min-h-[28rem] xl:h-auto"
           }`}
         >
           {cal.view === "month" && <MonthView cal={cal} />}
-          {cal.view === "week" && <TimeGrid key="week" cal={cal} days={weekOf(cal.date)} />}
+          {cal.view === "week" && (
+            <>
+              {/* Seven columns don't fit a phone: there the week is a readable list instead. */}
+              <div className="md:hidden">
+                <WeekList cal={cal} days={weekOf(cal.date)} tasks={tasks} />
+              </div>
+              <div className="hidden md:contents">
+                <TimeGrid key="week" cal={cal} days={weekOf(cal.date)} />
+              </div>
+            </>
+          )}
           {cal.view === "day" && <TimeGrid key="day" cal={cal} days={[cal.date]} />}
         </section>
-        <DayPanel cal={cal} className="xl:w-[22rem] xl:shrink-0 2xl:w-[24rem]" />
+        {/* On a phone the week list already shows every day, so the day panel would repeat it. */}
+        <DayPanel cal={cal} className={`xl:w-[22rem] xl:shrink-0 2xl:w-[24rem] ${cal.view === "week" ? "max-md:hidden" : ""}`} />
       </div>
 
       {editor && (
