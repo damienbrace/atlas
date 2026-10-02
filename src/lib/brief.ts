@@ -55,13 +55,17 @@ async function todaysEvents(refreshToken: string, scopes: string[] | undefined, 
   }
 }
 
+/** The Brief for whoever's signed in. Opening it also checks Gmail for new mail in the background. */
 export async function getBrief(): Promise<BriefData> {
+  const session = await getSession();
+  if (session) startSync(session.email, session.refreshToken);
+  return buildBrief(session);
+}
+
+/** The Brief's data for a Google account (or none), without starting a sync. The 5am notification uses it too. */
+export async function buildBrief(session: { email: string; refreshToken: string; scopes?: string[] } | null): Promise<BriefData> {
   const now = new Date();
   const today = dayKey(now);
-  const session = await getSession();
-  // Opening the Brief also checks Gmail for new mail in the background.
-  if (session) startSync(session.email, session.refreshToken);
-
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const [weather, calendar, inbox, sync, { habits, done }, entries, tasks, hidden] = await Promise.all([
     getWeather(),

@@ -8,6 +8,7 @@ import { iconButtonClass } from "@/components/icon-button";
 import { Menu } from "@/components/menu";
 import { useToast } from "@/components/toast";
 import { BRIEF_SECTIONS, type BriefSection } from "@/lib/brief-sections";
+import { summarySentence } from "@/lib/brief-summary";
 
 // Show and hide parts of the Brief. The choice is saved on the PC, so every device shares it.
 
@@ -135,11 +136,6 @@ export function Card({ id, title, icon, href, children }: { id: BriefSection; ti
 /** Atlas's one-line summary, rebuilt from whichever parts are showing. */
 export function Summary({ parts }: { parts: { section: BriefSection; text: string }[] }) {
   const { hidden } = useLayout();
-  const shown = parts.filter((p) => !hidden.has(p.section)).map((p) => p.text);
-  let sentence = "Nothing urgent today. A clear run.";
-  if (shown.length > 0) {
-    const joined = shown.length === 1 ? shown[0] : `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}`;
-    sentence = `${joined[0].toUpperCase()}${joined.slice(1)}.`;
-  }
+  const sentence = summarySentence(parts.filter((p) => !hidden.has(p.section)).map((p) => p.text));
   return <p className="min-w-0 flex-1 text-[16.5px] leading-relaxed">{sentence}</p>;
 }

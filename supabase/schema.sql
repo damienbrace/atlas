@@ -103,6 +103,17 @@ create table if not exists google_account (
   updated_at bigint not null
 );
 
+-- ---- Phone notifications ------------------------------------------------------
+
+-- One row per device that said yes to notifications (Web Push).
+create table if not exists push_subscriptions (
+  endpoint text primary key,
+  p256dh text not null,
+  auth text not null,
+  user_agent text,
+  created_at bigint not null
+);
+
 -- ---- Lock the public API out ------------------------------------------------
 
 alter table journal enable row level security;
@@ -117,3 +128,4 @@ alter table triage enable row level security;
 alter table drafts enable row level security;
 alter table overrides enable row level security;
 alter table google_account enable row level security;
+alter table push_subscriptions enable row level security;

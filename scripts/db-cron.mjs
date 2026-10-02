@@ -1,5 +1,6 @@
 // Schedules Atlas's background jobs in Supabase (pg_cron + pg_net): every 5 minutes it
-// calls the app's /api/cron/sync so mail downloads and gets sorted with every browser closed.
+// calls /api/cron/sync so mail downloads and gets sorted with every browser closed, and
+// at 5:00am Perth time /api/cron/brief sends the morning brief to your phone.
 // Run with `npm run db:cron -- https://your-atlas-address` (again whenever the address changes).
 
 import postgres from "postgres";
@@ -24,7 +25,11 @@ const call = (path) => `
     timeout_milliseconds := 10000
   )`;
 
-const JOBS = [{ name: "atlas-sync", schedule: "*/5 * * * *", command: call("/api/cron/sync") }];
+// pg_cron runs on UTC. Perth is UTC+8 all year (no daylight saving), so 21:00 UTC is 5:00am.
+const JOBS = [
+  { name: "atlas-sync", schedule: "*/5 * * * *", command: call("/api/cron/sync") },
+  { name: "atlas-brief", schedule: "0 21 * * *", command: call("/api/cron/brief") },
+];
 
 try {
   await sql`create extension if not exists pg_cron with schema pg_catalog`;

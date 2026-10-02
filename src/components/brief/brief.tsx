@@ -4,35 +4,17 @@ import type { ReactNode } from "react";
 import { Avatar } from "@/components/avatar";
 import { Sparkle } from "@/components/sparkle";
 import type { BriefData } from "@/lib/brief";
-import type { BriefSection } from "@/lib/brief-sections";
+import { plural, summaryParts } from "@/lib/brief-summary";
 import { calendarFor } from "@/lib/calendar/calendars";
 import { shortDate, timeLabel } from "@/lib/calendar/dates";
 import { longDay } from "@/lib/life/days";
 import type { Weather } from "@/lib/weather";
 import { BriefLayout, Card, CustomiseButton, HideButton, NothingShown, Show, Summary } from "./brief-layout";
 import { BriefHabits, BriefTasks } from "./brief-lists";
+import { NotifyButton } from "./notify-button";
 
 // The home screen: today at a glance. Rendered on the server; ticks and the show/hide
 // controls are interactive.
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-/** Pieces of Atlas's one-line read of the day, each tagged with the part of the Brief it comes from. */
-function summaryParts(data: BriefData) {
-  const parts: { section: BriefSection; text: string }[] = [];
-  if (data.replies.length) parts.push({ section: "needs", text: `${plural(data.replies.length, "reply", "replies")} needed` });
-  if (data.calendar.status === "ok") {
-    const n = data.calendar.events.length;
-    parts.push({ section: "today", text: n ? `${plural(n, "event")} today` : "a clear calendar" });
-  }
-  if (data.weather?.rainFrom) parts.push({ section: "weather", text: `showers likely from ${data.weather.rainFrom}` });
-  else if (data.weather?.hot) parts.push({ section: "weather", text: `a hot one at ${data.weather.today.high}°` });
-  const left = data.habits.length - data.habitsDone.length;
-  if (left > 0) parts.push({ section: "habits", text: `${plural(left, "habit")} to tick off` });
-  const dueTasks = data.tasks.filter((t) => !t.done && t.dueDay !== null && t.dueDay <= data.today).length;
-  if (dueTasks) parts.push({ section: "needs", text: `${plural(dueTasks, "task")} due` });
-  return parts;
-}
 
 function WeatherGlyph({ weather }: { weather: Weather }) {
   const className = "size-[18px]";
@@ -41,7 +23,7 @@ function WeatherGlyph({ weather }: { weather: Weather }) {
   return weather.now.label === "Clear" ? <Sun className={className} /> : <Cloud className={className} />;
 }
 
-export function Brief({ data }: { data: BriefData }) {
+export function Brief({ data, pushKey }: { data: BriefData; pushKey: string }) {
   const { weather } = data;
 
   return (
@@ -70,6 +52,7 @@ export function Brief({ data }: { data: BriefData }) {
                   </p>
                 </Show>
               )}
+              <NotifyButton publicKey={pushKey} />
               <CustomiseButton />
             </div>
           </header>
