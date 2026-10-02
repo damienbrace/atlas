@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "db:setup": "node --env-file=.env.local scripts/db-setup.mjs",
-    "db:import": "node --env-file=.env.local scripts/import-local.mjs"
+    "db:import": "node --env-file=.env.local scripts/import-local.mjs",
+    "db:cron": "node --env-file=.env.local scripts/db-cron.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",

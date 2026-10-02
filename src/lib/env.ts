@@ -2,8 +2,11 @@ import "server-only";
 
 // All server configuration, read from .env.local. Nothing here reaches the browser.
 
+// On Vercel, the production address (its custom domain once there is one) unless APP_URL says otherwise.
+const vercelUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null;
+
 export const env = {
-  appUrl: process.env.APP_URL ?? "http://localhost:3000",
+  appUrl: process.env.APP_URL || vercelUrl || "http://localhost:3000",
   /** Extra addresses Atlas is reached on, comma-separated (e.g. the phone's Tailscale https address). */
   extraOrigins: (process.env.APP_ORIGINS ?? "")
     .split(",")
