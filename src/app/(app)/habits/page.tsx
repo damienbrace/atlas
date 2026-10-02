@@ -12,5 +12,5 @@ const HISTORY_DAYS = 400;
 export default async function HabitsPage() {
   await connection();
   const today = dayKey(new Date());
-  return <Habits data={habitsData(addDays(today, -HISTORY_DAYS))} today={today} colors={HABIT_COLORS} />;
+  return <Habits data={await habitsData(addDays(today, -HISTORY_DAYS))} today={today} colors={HABIT_COLORS} />;
 }

@@ -1,18 +1,15 @@
 import "server-only";
-import { lifeDb } from "./db";
+import { sql } from "@/lib/db";
 
 // Small preferences, stored as JSON. They live with your data, so desktop and phone share them.
 
-export function getSetting<T>(key: string, fallback: T): T {
-  const row = lifeDb().prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
-  if (!row) return fallback;
-  try {
-    return JSON.parse(row.value) as T;
-  } catch {
-    return fallback;
-  }
+export async function getSetting<T>(key: string, fallback: T): Promise<T> {
+  const [row] = await sql<{ value: T }[]>`SELECT value FROM settings WHERE key = ${key}`;
+  return row ? row.value : fallback;
 }
 
-export function setSetting(key: string, value: unknown) {
-  lifeDb().prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(key, JSON.stringify(value));
+export async function setSetting(key: string, value: unknown) {
+  await sql`
+    INSERT INTO settings (key, value) VALUES (${key}, ${sql.json(value as never)})
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
 }

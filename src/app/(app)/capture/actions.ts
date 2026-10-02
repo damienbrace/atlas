@@ -1,6 +1,7 @@
 "use server";
 
 import { describeAiError, interpretCapture } from "@/lib/ai/claude";
+import { signedIn } from "@/lib/auth/session";
 import { aiConfigured } from "@/lib/env";
 import { isDayKey, longDay } from "@/lib/life/days";
 import { listHabits, setDone } from "@/lib/life/habits";
@@ -28,11 +29,12 @@ export async function understandCapture(
   transcript: string,
   today: string,
 ): Promise<{ ok: true; items: CaptureSuggestion[] } | { ok: false; error: string }> {
+  if (!(await signedIn())) return { ok: false, error: "Sign in again." };
   if (typeof transcript !== "string" || !transcript.trim() || transcript.length > 5000) return { ok: false, error: "Nothing to work with yet." };
   if (!isDayKey(today)) return { ok: false, error: "Bad request" };
   if (!aiConfigured()) return { ok: false, error: "Add an Anthropic API key to .env.local to use voice capture." };
 
-  const habits = listHabits();
+  const habits = await listHabits();
   try {
     const items = await interpretCapture(transcript.trim(), { key: today, label: longDay(today) }, habits, NOTE_TAGS);
     return {
@@ -60,6 +62,7 @@ export async function understandCapture(
 
 /** Saves one approved item where it belongs. */
 export async function saveCaptureItem(item: CaptureSuggestion, today: string) {
+  if (!(await signedIn())) return { ok: false as const };
   if (!isDayKey(today) || !item || typeof item !== "object") return { ok: false as const };
   const title = typeof item.title === "string" ? item.title.trim().slice(0, 300) : "";
   const body = typeof item.body === "string" ? item.body.trim().slice(0, 20_000) : "";
@@ -67,20 +70,20 @@ export async function saveCaptureItem(item: CaptureSuggestion, today: string) {
   switch (item.kind) {
     case "task":
       if (!title) return { ok: false as const };
-      addTask(title, isDayKey(item.dueDay) ? item.dueDay : null, "voice");
+      await addTask(title, isDayKey(item.dueDay) ? item.dueDay : null, "voice");
       return { ok: true as const };
     case "note":
       if (!title && !body) return { ok: false as const };
-      createNote(title, body, cleanTag(item.tag));
+      await createNote(title, body, cleanTag(item.tag));
       return { ok: true as const };
     case "journal":
       if (!body && !title) return { ok: false as const };
-      appendToEntry(today, body || title);
+      await appendToEntry(today, body || title);
       return { ok: true as const };
     case "habit": {
-      const habit = listHabits().find((h) => h.id === item.habitId);
+      const habit = (await listHabits()).find((h) => h.id === item.habitId);
       if (!habit) return { ok: false as const };
-      setDone(habit.id, today, true);
+      await setDone(habit.id, today, true);
       return { ok: true as const };
     }
     default:

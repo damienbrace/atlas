@@ -1,11 +1,9 @@
 import "server-only";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { sql, textList } from "@/lib/db";
 import type { Category, Label, Tone } from "@/lib/inbox/types";
 
-// Small JSON file of things worth keeping between runs: Atlas's read of each
-// thread, drafts it has written, and the sorting corrections I make. Lives in
-// .data/ (git- and Dropbox-ignored). Swaps for Supabase once sync moves server-side.
+// What Atlas has written about mail: its read of each thread, the drafts it has
+// written, and the sorting corrections I make. Stored in Supabase beside the mail.
 
 export interface Triage {
   category: Exclude<Category, "waiting">;
@@ -27,7 +25,7 @@ export interface Override {
   labels?: Label[];
 }
 
-interface StoreData {
+export interface Annotations {
   /** Keyed by `${threadId}:${lastMessageId}` so a new message re-triages the thread. */
   triage: Record<string, Triage>;
   drafts: Record<string, StoredDraft>;
@@ -35,34 +33,47 @@ interface StoreData {
   overrides: Record<string, Override>;
 }
 
-const FILE = path.join(process.cwd(), ".data", "atlas.json");
-
-let writes: Promise<void> = Promise.resolve();
-
-async function load(): Promise<StoreData> {
-  try {
-    return { triage: {}, drafts: {}, overrides: {}, ...JSON.parse(await readFile(FILE, "utf8")) };
-  } catch {
-    return { triage: {}, drafts: {}, overrides: {} };
-  }
+/** Everything Atlas has noted for these threads: `keys` are triage keys, `threadIds` the threads. */
+export async function annotationsFor(keys: string[], threadIds: string[]): Promise<Annotations> {
+  const [triage, drafts, overrides] = await Promise.all([
+    keys.length ? sql<{ key: string; data: Triage }[]>`SELECT key, data FROM triage WHERE key = ANY (${textList(keys)})` : [],
+    keys.length ? sql<{ key: string; data: StoredDraft }[]>`SELECT key, data FROM drafts WHERE key = ANY (${textList(keys)})` : [],
+    threadIds.length
+      ? sql<{ thread_id: string; data: Override }[]>`SELECT thread_id, data FROM overrides WHERE thread_id = ANY (${textList(threadIds)})`
+      : [],
+  ]);
+  return {
+    triage: Object.fromEntries(triage.map((r) => [r.key, r.data])),
+    drafts: Object.fromEntries(drafts.map((r) => [r.key, r.data])),
+    overrides: Object.fromEntries(overrides.map((r) => [r.thread_id, r.data])),
+  };
 }
 
-export async function readStore() {
-  await writes;
-  return load();
-}
-
-/** Serialised read-modify-write, written atomically via a temp file. */
-export function updateStore(change: (data: StoreData) => void) {
-  const run = writes.then(async () => {
-    const data = await load();
-    change(data);
-    await mkdir(path.dirname(FILE), { recursive: true });
-    const temp = `${FILE}.${process.pid}.tmp`;
-    await writeFile(temp, JSON.stringify(data));
-    await rename(temp, FILE);
+export async function saveTriage(entries: { key: string; threadId: string; triage: Triage }[]) {
+  if (entries.length === 0) return;
+  await sql.begin(async (tx) => {
+    for (const e of entries) {
+      await tx`
+        INSERT INTO triage (key, thread_id, data) VALUES (${e.key}, ${e.threadId}, ${tx.json(e.triage as never)})
+        ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data`;
+    }
   });
-  // Keep the queue alive if one write fails; the caller still sees the error.
-  writes = run.catch(() => {});
-  return run;
+}
+
+export async function getDraft(key: string) {
+  const [row] = await sql<{ data: StoredDraft }[]>`SELECT data FROM drafts WHERE key = ${key}`;
+  return row?.data ?? null;
+}
+
+export async function saveDraft(key: string, draft: StoredDraft) {
+  await sql`
+    INSERT INTO drafts (key, data) VALUES (${key}, ${sql.json(draft as never)})
+    ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data`;
+}
+
+/** Merges a correction into the thread's existing one. */
+export async function saveOverride(threadId: string, change: Override) {
+  await sql`
+    INSERT INTO overrides (thread_id, data) VALUES (${threadId}, ${sql.json(change as never)})
+    ON CONFLICT (thread_id) DO UPDATE SET data = overrides.data || EXCLUDED.data`;
 }

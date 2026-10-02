@@ -27,9 +27,12 @@ export async function getInbox(focusThreadId?: string): Promise<InboxData> {
   }
 
   startSync(session.email, session.refreshToken);
-  const { emails, cursor, hasOlder } = await firstPage();
-  const { expired, problem, ...sync } = syncStatus();
-  const focus = focusThreadId && /^[0-9a-f]{6,32}$/i.test(focusThreadId) ? await threadRow(focusThreadId) : null;
+  const focusId = focusThreadId && /^[0-9a-f]{6,32}$/i.test(focusThreadId) ? focusThreadId : null;
+  const [{ emails, cursor, hasOlder }, { expired, problem, ...sync }, focus] = await Promise.all([
+    firstPage(),
+    syncStatus(),
+    focusId ? threadRow(focusId) : null,
+  ]);
   return {
     source: "gmail",
     account: session.email,

@@ -1,7 +1,7 @@
 import "server-only";
 import type { ParsedThread } from "@/lib/gmail/parse";
 import type { Email } from "@/lib/inbox/types";
-import { readStore, type Override, type StoredDraft, type Triage } from "@/lib/store";
+import { annotationsFor, type Annotations, type Override, type StoredDraft, type Triage } from "@/lib/store";
 import { getThread, hasThreadsBefore, listThreads, searchThreads } from "./db";
 import { SORT_DAYS, triageKey } from "./sync";
 
@@ -16,7 +16,10 @@ const OLDER_PAGE = 100;
 const SEARCH_LIMIT = 100;
 const MAX_REPLY_CHARS = 4000;
 
-type Annotations = Awaited<ReturnType<typeof readStore>>;
+/** What Atlas has noted about these threads. */
+function notesFor(threads: ParsedThread[]) {
+  return annotationsFor(threads.map(triageKey), threads.map((t) => t.id));
+}
 
 function toEmails(threads: ParsedThread[], notes: Annotations, includeArchived = false) {
   const now = Date.now();
@@ -31,14 +34,14 @@ function toEmails(threads: ParsedThread[], notes: Annotations, includeArchived =
 /** The newest inbox rows: the whole sorted fortnight, padded to a sensible minimum. */
 export async function firstPage() {
   const since = Date.now() - SORT_DAYS * DAY_MS;
-  let threads = listThreads({ since, limit: 1000 });
-  if (threads.length < MIN_FIRST_PAGE) threads = listThreads({ limit: MIN_FIRST_PAGE });
-  return page(threads, await readStore());
+  let threads = await listThreads({ since, limit: 1000, bodyChars: MAX_REPLY_CHARS });
+  if (threads.length < MIN_FIRST_PAGE) threads = await listThreads({ limit: MIN_FIRST_PAGE, bodyChars: MAX_REPLY_CHARS });
+  return page(threads);
 }
 
 /** The next rows older than `before` (epoch ms). */
 export async function olderPage(before: number) {
-  return page(listThreads({ before, limit: OLDER_PAGE }), await readStore());
+  return page(await listThreads({ before, limit: OLDER_PAGE, bodyChars: MAX_REPLY_CHARS }));
 }
 
 /** A page of rows, plus the cursor (latest activity of its oldest thread) for fetching the next one. */
@@ -48,24 +51,22 @@ export interface InboxPage {
   hasOlder: boolean;
 }
 
-function page(threads: ParsedThread[], notes: Annotations): InboxPage {
+async function page(threads: ParsedThread[]): Promise<InboxPage> {
   const oldest = threads.at(-1)?.messages.at(-1)?.date;
   const cursor = oldest ? Date.parse(oldest) : null;
-  return {
-    emails: toEmails(threads, notes),
-    cursor,
-    hasOlder: cursor !== null && hasThreadsBefore(cursor),
-  };
+  const [notes, hasOlder] = await Promise.all([notesFor(threads), cursor !== null && hasThreadsBefore(cursor)]);
+  return { emails: toEmails(threads, notes), cursor, hasOlder };
 }
 
 export async function search(query: string) {
-  return toEmails(searchThreads(query, SEARCH_LIMIT), await readStore(), true);
+  const threads = await searchThreads(query, SEARCH_LIMIT, MAX_REPLY_CHARS);
+  return toEmails(threads, await notesFor(threads), true);
 }
 
 /** One thread as an inbox row, archived or not: for links like /inbox?thread=… */
 export async function threadRow(threadId: string) {
-  const thread = getThread(threadId);
-  return thread ? (toEmails([thread], await readStore(), true)[0] ?? null) : null;
+  const thread = await getThread(threadId);
+  return thread ? (toEmails([thread], await notesFor([thread]), true)[0] ?? null) : null;
 }
 
 function toEmail(

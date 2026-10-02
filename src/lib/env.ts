@@ -13,6 +13,10 @@ export const env = {
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
   sessionSecret: process.env.SESSION_SECRET ?? "",
   ownerName: process.env.OWNER_NAME || "Damien",
+  /** The one Google account allowed to sign in. Required once Atlas is on the internet. */
+  ownerEmail: (process.env.OWNER_EMAIL ?? "").trim().toLowerCase(),
+  /** Shared with the scheduled jobs (Supabase cron) that call /api/cron/*. */
+  cronSecret: process.env.CRON_SECRET ?? "",
 };
 
 export const googleConfigured = () => Boolean(env.googleClientId && env.googleClientSecret && env.sessionSecret);

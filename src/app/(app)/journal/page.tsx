@@ -8,5 +8,5 @@ export const metadata: Metadata = { title: "Journal · Atlas" };
 
 export default async function JournalPage() {
   await connection();
-  return <Journal entries={listEntries()} today={dayKey(new Date())} />;
+  return <Journal entries={await listEntries()} today={dayKey(new Date())} />;
 }

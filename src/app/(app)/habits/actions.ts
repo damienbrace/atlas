@@ -1,5 +1,6 @@
 "use server";
 
+import { signedIn } from "@/lib/auth/session";
 import { dayKey, isDayKey } from "@/lib/life/days";
 import { archiveHabit, createHabit, HABIT_COLORS, setDone, updateHabit } from "@/lib/life/habits";
 
@@ -15,23 +16,26 @@ function cleanHabit(name: unknown, color: unknown, days: unknown) {
 }
 
 export async function markHabit(habitId: string, day: string, done: boolean) {
+  if (!(await signedIn())) return { ok: false as const };
   if (!isId(habitId) || !isDayKey(day) || typeof done !== "boolean") return { ok: false as const };
-  setDone(habitId, day, done);
+  await setDone(habitId, day, done);
   return { ok: true as const };
 }
 
 export async function saveHabit(input: { id?: string; name: string; color: string; days: number[] }) {
+  if (!(await signedIn())) return { ok: false as const };
   const habit = cleanHabit(input.name, input.color, input.days);
   if (!habit || (input.id !== undefined && !isId(input.id))) return { ok: false as const };
   if (input.id) {
-    updateHabit(input.id, habit.name, habit.color, habit.days);
+    await updateHabit(input.id, habit.name, habit.color, habit.days);
     return { ok: true as const, id: input.id };
   }
-  return { ok: true as const, id: createHabit(habit.name, habit.color, habit.days), since: dayKey(new Date()) };
+  return { ok: true as const, id: await createHabit(habit.name, habit.color, habit.days), since: dayKey(new Date()) };
 }
 
 export async function removeHabit(habitId: string) {
+  if (!(await signedIn())) return { ok: false as const };
   if (!isId(habitId)) return { ok: false as const };
-  archiveHabit(habitId);
+  await archiveHabit(habitId);
   return { ok: true as const };
 }

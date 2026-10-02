@@ -1,5 +1,5 @@
 import "server-only";
-import { lifeDb } from "./db";
+import { sql } from "@/lib/db";
 
 export interface JournalEntry {
   day: string;
@@ -18,24 +18,23 @@ interface Row {
 const toEntry = (r: Row): JournalEntry => ({ day: r.day, body: r.body, mood: r.mood, updatedAt: r.updated_at });
 
 /** Every entry, newest first. A daily journal stays small enough to send whole. */
-export function listEntries() {
-  return (lifeDb().prepare("SELECT * FROM journal WHERE body != '' OR mood IS NOT NULL ORDER BY day DESC").all() as unknown as Row[]).map(
-    toEntry,
-  );
+export async function listEntries() {
+  const rows = await sql<Row[]>`SELECT * FROM journal WHERE body <> '' OR mood IS NOT NULL ORDER BY day DESC`;
+  return rows.map(toEntry);
 }
 
-export function saveEntry(day: string, body: string, mood: number | null) {
+export async function saveEntry(day: string, body: string, mood: number | null) {
   const empty = body.trim() === "" && mood === null;
-  if (empty) lifeDb().prepare("DELETE FROM journal WHERE day = ?").run(day);
+  if (empty) await sql`DELETE FROM journal WHERE day = ${day}`;
   else
-    lifeDb()
-      .prepare("INSERT OR REPLACE INTO journal (day, body, mood, updated_at) VALUES (?, ?, ?, ?)")
-      .run(day, body, mood, Date.now());
+    await sql`
+      INSERT INTO journal (day, body, mood, updated_at) VALUES (${day}, ${body}, ${mood}, ${Date.now()})
+      ON CONFLICT (day) DO UPDATE SET body = EXCLUDED.body, mood = EXCLUDED.mood, updated_at = EXCLUDED.updated_at`;
 }
 
 /** Adds a line to a day's entry (used by voice capture). */
-export function appendToEntry(day: string, text: string) {
-  const row = lifeDb().prepare("SELECT * FROM journal WHERE day = ?").get(day) as Row | undefined;
+export async function appendToEntry(day: string, text: string) {
+  const [row] = await sql<Row[]>`SELECT * FROM journal WHERE day = ${day}`;
   const body = row?.body.trim() ? `${row.body.trimEnd()}\n\n${text}` : text;
-  saveEntry(day, body, row?.mood ?? null);
+  await saveEntry(day, body, row?.mood ?? null);
 }

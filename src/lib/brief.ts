@@ -62,20 +62,24 @@ export async function getBrief(): Promise<BriefData> {
   // Opening the Brief also checks Gmail for new mail in the background.
   if (session) startSync(session.email, session.refreshToken);
 
-  const [weather, calendar, inbox] = await Promise.all([
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const [weather, calendar, inbox, sync, { habits, done }, entries, tasks, hidden] = await Promise.all([
     getWeather(),
     session ? todaysEvents(session.refreshToken, session.scopes, today) : Promise.resolve({ status: "not-connected" as const, events: [] }),
     session ? firstPage() : Promise.resolve(null),
+    session ? syncStatus() : Promise.resolve(null),
+    habitsData(today),
+    listEntries(),
+    listTasks(todayStart),
+    getSetting<unknown[]>("brief.hidden", []),
   ]);
 
   const emails = inbox?.emails ?? [];
   const replies = emails.filter((e) => e.category === "action" && e.direction === "in" && !e.repliedAt).slice(0, MAX_REPLIES);
   const waiting = emails.filter((e) => e.category === "waiting").slice(0, MAX_WAITING);
 
-  const { habits, done } = habitsData(today);
   const habitsDone = habits.filter((h) => done[h.id]?.includes(today)).map((h) => h.id);
-  const entry = listEntries().find((e) => e.day === today);
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const entry = entries.find((e) => e.day === today);
 
   return {
     name: env.ownerName,
@@ -86,11 +90,11 @@ export async function getBrief(): Promise<BriefData> {
     gmailConnected: Boolean(session),
     replies,
     waiting,
-    stillSorting: session ? syncStatus().sortingLeft > 0 : false,
+    stillSorting: (sync?.sortingLeft ?? 0) > 0,
     habits,
     habitsDone,
     journalWords: entry?.body.trim() ? entry.body.trim().split(/\s+/).length : null,
-    tasks: listTasks(todayStart),
-    hidden: getSetting<unknown[]>("brief.hidden", []).filter(isBriefSection),
+    tasks,
+    hidden: hidden.filter(isBriefSection),
   };
 }

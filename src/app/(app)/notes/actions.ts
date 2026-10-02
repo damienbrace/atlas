@@ -1,7 +1,7 @@
 "use server";
 
 import { answerQuestion, describeAiError, type AskSource } from "@/lib/ai/claude";
-import { getSession } from "@/lib/auth/session";
+import { signedIn } from "@/lib/auth/session";
 import { aiConfigured } from "@/lib/env";
 import { longDay, dayKey } from "@/lib/life/days";
 import { createNote, deleteNote, NOTE_TAGS, notesMatching, updateNote, type NoteTag } from "@/lib/life/notes";
@@ -15,20 +15,22 @@ const cleanTag = (tag: unknown): NoteTag | null => ((NOTE_TAGS as readonly unkno
 const MAX_CHARS = 100_000;
 
 export async function saveNote(input: { id?: string; title: string; body: string; tag: string | null }) {
+  if (!(await signedIn())) return { ok: false as const };
   const { id, title, body } = input;
   if (typeof title !== "string" || typeof body !== "string" || title.length > 300 || body.length > MAX_CHARS) return { ok: false as const };
   if (id !== undefined && !isId(id)) return { ok: false as const };
   const tag = cleanTag(input.tag);
   if (id) {
-    updateNote(id, title, body, tag);
+    await updateNote(id, title, body, tag);
     return { ok: true as const, id };
   }
-  return { ok: true as const, ...createNote(title, body, tag) };
+  return { ok: true as const, ...(await createNote(title, body, tag)) };
 }
 
 export async function removeNote(id: string) {
+  if (!(await signedIn())) return { ok: false as const };
   if (!isId(id)) return { ok: false as const };
-  deleteNote(id);
+  await deleteNote(id);
   return { ok: true as const };
 }
 
@@ -42,14 +44,14 @@ export type AskResult =
 
 /** Answers a plain-English question from your notes and (if Gmail's connected) your stored email. */
 export async function askAtlas(question: string): Promise<AskResult> {
+  if (!(await signedIn())) return { ok: false, error: "Sign in again." };
   if (typeof question !== "string" || !question.trim() || question.length > 500) return { ok: false, error: "Ask a question first." };
   const words = searchWords(question);
   if (words.length === 0) return { ok: false, error: "Add a few more specific words to the question." };
 
-  const emails = (await getSession()) ? messagesMatching(words, 10) : [];
-  const notes = notesMatching(words, 6);
+  const [emails, notes] = await Promise.all([messagesMatching(words, 10), notesMatching(words, 6)]);
   if (emails.length === 0 && notes.length === 0) {
-    return { ok: true, found: false, sources: [], answer: "Nothing in your notes or the last 3 months of email mentions that." };
+    return { ok: true, found: false, sources: [], answer: "Nothing in your notes or the last year of email mentions that." };
   }
   if (!aiConfigured()) return { ok: false, error: "Add an Anthropic API key to .env.local to ask Atlas questions." };
 

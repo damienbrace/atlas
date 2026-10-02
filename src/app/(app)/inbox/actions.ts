@@ -2,6 +2,7 @@
 
 import { refresh } from "next/cache";
 import { describeAiError, writeDraft } from "@/lib/ai/claude";
+import { deleteGoogleAccounts } from "@/lib/auth/account";
 import { clearSession, getSession } from "@/lib/auth/session";
 import { aiConfigured } from "@/lib/env";
 import { GmailClient } from "@/lib/gmail/client";
@@ -11,7 +12,7 @@ import { CATEGORIES, LABELS } from "@/lib/inbox/categories";
 import type { Category, Label, Tone } from "@/lib/inbox/types";
 import { clearMail, getThread } from "@/lib/mail/db";
 import { triageKey } from "@/lib/mail/sync";
-import { readStore, updateStore } from "@/lib/store";
+import { getDraft, saveDraft, saveOverride as storeOverride } from "@/lib/store";
 
 // Server Functions are public endpoints: check the session and validate every input.
 
@@ -31,10 +32,10 @@ export async function draftReply(threadId: string, tone: Tone, fresh = false): P
   if (!aiConfigured()) return { ok: false, error: "Add an Anthropic API key to get drafts." };
 
   try {
-    // The local mail store has it unless sync hasn't reached it yet.
-    const thread = getThread(threadId) ?? parseThread(await new GmailClient(session.refreshToken).thread(threadId));
+    // The mail store has it unless sync hasn't reached it yet.
+    const thread = (await getThread(threadId)) ?? parseThread(await new GmailClient(session.refreshToken).thread(threadId));
     const key = triageKey(thread);
-    const cached = fresh ? undefined : (await readStore()).drafts[key];
+    const cached = fresh ? null : await getDraft(key);
     const hit = cached?.variants[tone];
     if (cached && hit) return { ok: true, rationale: cached.rationale, text: hit };
 
@@ -46,12 +47,7 @@ export async function draftReply(threadId: string, tone: Tone, fresh = false): P
     }
     const text = tone === "original" ? original : (await writeDraft(thread, tone, original)).text;
 
-    await updateStore((data) => {
-      const entry = fresh || !data.drafts[key] ? { rationale: rationale!, variants: {} } : data.drafts[key];
-      entry.variants.original = original;
-      entry.variants[tone] = text;
-      data.drafts[key] = entry;
-    });
+    await saveDraft(key, { rationale: rationale!, variants: { ...cached?.variants, original, [tone]: text } });
     return { ok: true, rationale, text };
   } catch (error) {
     console.error("[atlas] draft failed", error);
@@ -64,23 +60,18 @@ export async function saveOverride(threadId: string, change: { category?: Catego
   if (!isThreadId(threadId) || !(await getSession())) return;
   const category = CATEGORIES.some((c) => c.id === change.category) ? change.category : undefined;
   const labels = change.labels?.filter((l) => (LABELS as readonly string[]).includes(l));
-  await updateStore((data) => {
-    const entry = (data.overrides[threadId] ??= {});
-    if (category) entry.category = category;
-    if (labels) entry.labels = labels;
-  });
+  if (category || labels) await storeOverride(threadId, { ...(category && { category }), ...(labels && { labels }) });
 }
 
-/** Disconnects Gmail and deletes Atlas's local copy of the mail and what it wrote about it. */
+/**
+ * Disconnects Google: hands the permission back, signs this browser out, and deletes
+ * Atlas's copy of the mail and what it wrote about it. Journal, notes and habits stay.
+ */
 export async function disconnectGmail() {
   const session = await getSession();
-  if (session) await revoke(session.refreshToken);
+  if (!session) return;
+  await revoke(session.refreshToken);
   await clearSession();
-  clearMail();
-  await updateStore((data) => {
-    data.triage = {};
-    data.drafts = {};
-    data.overrides = {};
-  });
+  await Promise.all([deleteGoogleAccounts(), clearMail()]);
   refresh();
 }

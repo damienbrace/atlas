@@ -1,13 +1,13 @@
 import "server-only";
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { env } from "@/lib/env";
+import { SESSION_COOKIE, seal, unseal } from "./seal";
 
-// The Gmail refresh token lives only in this browser's cookie, encrypted with
-// SESSION_SECRET (AES-256-GCM). Nothing is stored server-side, so a browser that
-// hasn't connected Gmail just sees the sample inbox.
+// Signing in with Google gives this browser a session cookie holding the account
+// and its refresh token, encrypted with SESSION_SECRET (AES-256-GCM). Only the
+// owner's account (OWNER_EMAIL) gets one, so having a session means "it's me".
+// The scheduled jobs use the server-side copy in ./account.ts instead.
 
-const SESSION_COOKIE = "atlas_session";
 const OAUTH_COOKIE = "atlas_oauth";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 180;
 
@@ -25,32 +25,6 @@ export interface OAuthState {
   redirectUri: string;
 }
 
-function key() {
-  if (!env.sessionSecret) throw new Error("SESSION_SECRET is not set");
-  return createHash("sha256").update(env.sessionSecret).digest();
-}
-
-export function seal(value: unknown) {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", key(), iv);
-  const body = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final()]);
-  return Buffer.concat([iv, cipher.getAuthTag(), body]).toString("base64url");
-}
-
-export function unseal<T>(sealed: string | undefined): T | null {
-  if (!sealed || !env.sessionSecret) return null;
-  try {
-    const raw = Buffer.from(sealed, "base64url");
-    const decipher = createDecipheriv("aes-256-gcm", key(), raw.subarray(0, 12));
-    decipher.setAuthTag(raw.subarray(12, 28));
-    const text = Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString("utf8");
-    return JSON.parse(text) as T;
-  } catch {
-    // Tampered, or sealed with a different SESSION_SECRET.
-    return null;
-  }
-}
-
 const cookieOptions = (maxAge: number) => ({
   httpOnly: true,
   sameSite: "lax" as const,
@@ -62,6 +36,11 @@ const cookieOptions = (maxAge: number) => ({
 export async function getSession() {
   const store = await cookies();
   return unseal<Session>(store.get(SESSION_COOKIE)?.value);
+}
+
+/** Server Functions are public endpoints, so each one checks for the owner's session itself. */
+export async function signedIn() {
+  return (await getSession()) !== null;
 }
 
 /** Route Handlers and Server Functions only (cookies can't be set while rendering). */

@@ -9,12 +9,12 @@ export const metadata: Metadata = { title: "Notes · Atlas" };
 export default async function NotesPage(props: PageProps<"/notes">) {
   await connection();
   const { note } = await props.searchParams;
-  const emailConnected = Boolean(await getSession());
+  const [session, notes] = await Promise.all([getSession(), listNotes()]);
   return (
     <Notes
-      notes={listNotes()}
+      notes={notes}
       tags={[...NOTE_TAGS]}
-      emailConnected={emailConnected}
+      emailConnected={Boolean(session)}
       openNoteId={typeof note === "string" ? note : null}
     />
   );

@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { lifeDb } from "./db";
+import { sql } from "@/lib/db";
 import { dayKey } from "./days";
 
 export interface Habit {
@@ -39,49 +39,39 @@ const toHabit = (r: HabitRow): Habit => ({
   since: dayKey(new Date(r.created_at)),
 });
 
-export function listHabits() {
-  return (lifeDb().prepare("SELECT * FROM habits WHERE archived = 0 ORDER BY position, created_at").all() as unknown as HabitRow[]).map(
-    toHabit,
-  );
+export async function listHabits() {
+  return (await sql<HabitRow[]>`SELECT * FROM habits WHERE NOT archived ORDER BY position, created_at`).map(toHabit);
 }
 
 /** Habits and their ticks from `since` (YYYY-MM-DD) on. */
-export function habitsData(since: string): HabitsData {
-  const habits = listHabits();
-  const rows = lifeDb().prepare("SELECT habit_id, day FROM habit_checks WHERE day >= ? ORDER BY day").all(since) as {
-    habit_id: string;
-    day: string;
-  }[];
+export async function habitsData(since: string): Promise<HabitsData> {
+  const [habits, rows] = await Promise.all([
+    listHabits(),
+    sql<{ habit_id: string; day: string }[]>`SELECT habit_id, day FROM habit_checks WHERE day >= ${since} ORDER BY day`,
+  ]);
   const done: Record<string, string[]> = Object.fromEntries(habits.map((h) => [h.id, []]));
   for (const r of rows) done[r.habit_id]?.push(r.day);
   return { habits, done };
 }
 
-export function setDone(habitId: string, day: string, done: boolean) {
-  if (done) lifeDb().prepare("INSERT OR IGNORE INTO habit_checks (habit_id, day) VALUES (?, ?)").run(habitId, day);
-  else lifeDb().prepare("DELETE FROM habit_checks WHERE habit_id = ? AND day = ?").run(habitId, day);
+export async function setDone(habitId: string, day: string, done: boolean) {
+  if (done) await sql`INSERT INTO habit_checks (habit_id, day) VALUES (${habitId}, ${day}) ON CONFLICT DO NOTHING`;
+  else await sql`DELETE FROM habit_checks WHERE habit_id = ${habitId} AND day = ${day}`;
 }
 
-export function createHabit(name: string, color: string, days: number[]) {
+export async function createHabit(name: string, color: string, days: number[]) {
   const id = randomUUID();
-  const position = (lifeDb().prepare("SELECT COALESCE(MAX(position), 0) + 1 AS p FROM habits").get() as { p: number }).p;
-  lifeDb()
-    .prepare("INSERT INTO habits (id, name, color, days, position, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-    .run(id, name, color, days.join(""), position, Date.now());
+  await sql`
+    INSERT INTO habits (id, name, color, days, position, created_at)
+    SELECT ${id}, ${name}, ${color}, ${days.join("")}, COALESCE(MAX(position), 0) + 1, ${Date.now()} FROM habits`;
   return id;
 }
 
-export function updateHabit(id: string, name: string, color: string, days: number[]) {
-  lifeDb().prepare("UPDATE habits SET name = ?, color = ?, days = ? WHERE id = ?").run(name, color, days.join(""), id);
+export async function updateHabit(id: string, name: string, color: string, days: number[]) {
+  await sql`UPDATE habits SET name = ${name}, color = ${color}, days = ${days.join("")} WHERE id = ${id}`;
 }
 
 /** Hides a habit but keeps its history. */
-export function archiveHabit(id: string) {
-  lifeDb().prepare("UPDATE habits SET archived = 1 WHERE id = ?").run(id);
-}
-
-export function findHabit(name: string) {
-  const all = listHabits();
-  const wanted = name.trim().toLowerCase();
-  return all.find((h) => h.name.toLowerCase() === wanted) ?? null;
+export async function archiveHabit(id: string) {
+  await sql`UPDATE habits SET archived = TRUE WHERE id = ${id}`;
 }

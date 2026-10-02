@@ -18,6 +18,11 @@ function stem(word: string) {
   return word;
 }
 
+/** `%text%` for SQL LIKE / ILIKE, with LIKE's own wildcards escaped (backslash is the default escape). */
+export function likePattern(text: string) {
+  return `%${text.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+}
+
 export function searchWords(question: string, max = 8) {
   const words = question
     .toLowerCase()

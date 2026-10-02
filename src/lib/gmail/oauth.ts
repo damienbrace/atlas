@@ -7,7 +7,11 @@ import { env } from "@/lib/env";
 
 export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 export const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
-const SCOPES = [GMAIL_SCOPE, CALENDAR_SCOPE].join(" ");
+/** Put Atlas's drafts into Gmail's Drafts folder. Sending stays with you, in Gmail. */
+export const COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose";
+/** Nightly backups: Atlas can only see the files it creates in Drive. */
+export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const SCOPES = [GMAIL_SCOPE, CALENDAR_SCOPE, COMPOSE_SCOPE, DRIVE_FILE_SCOPE].join(" ");
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
