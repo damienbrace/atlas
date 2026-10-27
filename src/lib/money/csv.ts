@@ -1,7 +1,8 @@
 // Reading bank CSV exports. Safe in the browser (preview and column picking) and on
 // the server. Australian banks differ: CommBank and ANZ have no header row (date,
-// amount, description[, balance]); Westpac, NAB, Bankwest and others name their
-// columns, sometimes with separate debit and credit columns.
+// amount, description[, balance]); Westpac, NAB, Bankwest, Up and others name their
+// columns, sometimes with separate debit and credit columns. Columns are found by
+// name where there's a header, and by what the cells look like otherwise.
 
 export type DateOrder = "dmy" | "mdy" | "ymd";
 
@@ -9,11 +10,17 @@ export interface Mapping {
   hasHeader: boolean;
   date: number;
   description: number;
+  /** Who was paid, when the bank keeps it apart from the description (Up, NAB). */
+  payee: number | null;
   /** One signed amount column, or else separate debit and credit columns. */
   amount: number | null;
   debit: number | null;
   credit: number | null;
   balance: number | null;
+  /** Each row's account, for exports that cover several (Up's Spending plus savers). */
+  account: number | null;
+  /** The bank's own transaction type, used only to spot moves between my own accounts. */
+  type: number | null;
   dateOrder: DateOrder;
   /** Some card exports show spending as positive; flip so money out is negative. */
   flip: boolean;
@@ -24,6 +31,10 @@ export interface CsvRow {
   amountCents: number;
   description: string;
   balanceCents: number | null;
+  /** The row's own account, when the file says; otherwise the upload's. */
+  account: string | null;
+  /** The bank marked it as a move between my own accounts (Up's "Transfer" and "Round Up"). */
+  transfer: boolean;
   /** Nth identical transaction (same day, amount and description) in the file. */
   seq: number;
 }
@@ -80,16 +91,18 @@ function toDay(y: number, m: number, d: number) {
   return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
-const NUMERIC_DATE = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})\b/;
+// "(?!\d)" rather than "\b" so a time can follow straight on, as in "2026-10-03T09:15:00+08:00".
+const NUMERIC_DATE = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})(?!\d)/;
 
-/** "03/10/2026", "3/10/26", "2026-10-03", "03 Oct 2026", "03-Oct-26" → "2026-10-03". */
+/** "03/10/2026", "3/10/26", "2026-10-03", "2026-10-03T09:15:00+08:00", "03 Oct 2026", "03-Oct-26" → "2026-10-03". */
 export function parseDate(text: string, order: DateOrder = "dmy"): string | null {
   const s = text.trim();
-  let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b/);
+  // A date with a time keeps the date as written: that's the bank's local day.
+  let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?!\d)/);
   if (m) return toDay(+m[1], +m[2], +m[3]);
-  m = s.match(/^(\d{1,2})[-/. ]+([A-Za-z]{3,9})[-/., ]+(\d{2}|\d{4})\b/);
+  m = s.match(/^(\d{1,2})[-/. ]+([A-Za-z]{3,9})[-/., ]+(\d{2}|\d{4})(?!\d)/);
   if (m && monthNumber(m[2])) return toDay(fullYear(+m[3]), monthNumber(m[2]), +m[1]);
-  m = s.match(/^([A-Za-z]{3,9})[ -]+(\d{1,2}),?[ -]+(\d{4})\b/);
+  m = s.match(/^([A-Za-z]{3,9})[ -]+(\d{1,2}),?[ -]+(\d{4})(?!\d)/);
   if (m && monthNumber(m[1])) return toDay(+m[3], monthNumber(m[1]), +m[2]);
   m = s.match(NUMERIC_DATE);
   if (m) {
@@ -140,26 +153,27 @@ export function parseAmount(text: string): number | null {
 
 // ---- Working out the columns --------------------------------------------------
 
-const HEADER_NAMES: Record<"date" | "description" | "amount" | "debit" | "credit" | "balance", string[]> = {
-  date: ["date", "transaction date", "posted date", "posting date", "effective date", "processed date", "value date"],
-  description: ["description", "transaction details", "narrative", "narration", "details", "transaction description", "memo", "payee", "particulars", "merchant name"],
-  amount: ["amount", "transaction amount", "amount aud", "value"],
-  debit: ["debit", "debit amount", "debits", "withdrawal", "withdrawals", "money out", "paid out"],
-  credit: ["credit", "credit amount", "credits", "deposit", "deposits", "money in", "paid in"],
-  balance: ["balance", "running balance", "closing balance"],
+type Role = "date" | "description" | "payee" | "amount" | "debit" | "credit" | "balance" | "account" | "type";
+
+// Names banks give their columns, best first (lowercase, letters and spaces only).
+const HEADER_NAMES: Record<Role, string[]> = {
+  date: ["date", "transaction date", "time", "transaction time", "date time", "datetime", "created", "created at", "posted date", "posting date", "effective date", "processed date", "completed date", "value date", "settled date"],
+  description: ["description", "transaction details", "narrative", "narration", "details", "transaction description", "memo", "particulars", "reference"],
+  payee: ["payee", "merchant name", "merchant", "counterparty", "name"],
+  // Up's Subtotal is the purchase itself; its Total adds the round-up that goes to a saver.
+  amount: ["amount", "transaction amount", "amount aud", "subtotal aud", "total aud", "net amount", "value", "total"],
+  debit: ["debit", "debit amount", "debits", "debit aud", "withdrawal", "withdrawals", "withdrawal amount", "money out", "paid out"],
+  credit: ["credit", "credit amount", "credits", "credit aud", "deposit", "deposits", "deposit amount", "money in", "paid in"],
+  balance: ["balance", "running balance", "closing balance", "balance aud"],
+  account: ["account name", "account nickname", "account"],
+  type: ["transaction type", "type"],
 };
 
-const headerName = (cell: string) => cell.toLowerCase().replace(/[^a-z ]+/g, " ").replace(/\s+/g, " ").trim();
+// Only types that always mean "between my own accounts". Others ("TFR", "Transfer debit") can be
+// payments to other people, so those are left for Atlas to read.
+const OWN_ACCOUNT_TYPES = /^(transfer|round ?up|internal transfer|transfer between (my )?accounts)$/i;
 
-function findHeader(header: string[], names: string[]) {
-  const cells = header.map(headerName);
-  // Earlier names are preferred, e.g. "transaction details" over "merchant name".
-  for (const name of names) {
-    const i = cells.indexOf(name);
-    if (i !== -1) return i;
-  }
-  return null;
-}
+const headerName = (cell: string) => cell.toLowerCase().replace(/[^a-z ]+/g, " ").replace(/\s+/g, " ").trim();
 
 const share = (values: string[], test: (v: string) => boolean) =>
   values.length ? values.filter(test).length / values.length : 0;
@@ -168,45 +182,82 @@ const share = (values: string[], test: (v: string) => boolean) =>
 export function detectMapping(rows: string[][]): Mapping | null {
   if (rows.length === 0) return null;
   const width = Math.max(...rows.slice(0, 30).map((r) => r.length));
+  const indexes = Array.from({ length: width }, (_, i) => i);
   const first = rows[0];
-  const hasHeader =
-    parseDate(first[0] ?? "") === null &&
-    first.filter((cell) => Object.values(HEADER_NAMES).some((names) => names.includes(headerName(cell)))).length >= 2;
+  // Every transaction has a date, so a first row without one is the column names.
+  const hasHeader = rows.length > 1 && !first.some((cell) => parseDate(cell) !== null);
   const sample = rows.slice(hasHeader ? 1 : 0, 31);
   const column = (i: number) => sample.map((r) => r[i] ?? "");
+  const filled = (i: number) => column(i).filter((v) => v !== "");
 
-  let mapping: Omit<Mapping, "dateOrder" | "flip"> | null = null;
-  if (hasHeader) {
-    const date = findHeader(first, HEADER_NAMES.date);
-    const description = findHeader(first, HEADER_NAMES.description);
-    const amount = findHeader(first, HEADER_NAMES.amount);
-    const debit = findHeader(first, HEADER_NAMES.debit);
-    const credit = findHeader(first, HEADER_NAMES.credit);
-    if (date !== null && description !== null && (amount !== null || (debit !== null && credit !== null))) {
-      mapping = {
-        hasHeader,
-        date,
-        description,
-        amount: amount !== null ? amount : null,
-        debit: amount === null ? debit : null,
-        credit: amount === null ? credit : null,
-        balance: findHeader(first, HEADER_NAMES.balance),
-      };
+  // Either day-first or month-first counts here; guessDateOrder settles which one below.
+  const isDate = (i: number) => share(column(i), (v) => parseDate(v, "dmy") !== null || parseDate(v, "mdy") !== null) >= 0.8;
+  // Debit and credit columns are half empty, so judge numbers by the cells that have something.
+  const isNumber = (i: number) => filled(i).length > 0 && share(filled(i), (v) => parseAmount(v) !== null) >= 0.8;
+  const isText = (i: number) => filled(i).length > 0 && share(filled(i), (v) => /[a-z]/i.test(v) && parseAmount(v) === null) >= 0.8;
+  const letters = (i: number) => column(i).reduce((sum, v) => sum + (v.match(/[a-z]/gi)?.length ?? 0), 0);
+
+  // A named column only counts if its cells look right, so a mislabelled export can't fool it.
+  const names = hasHeader ? first.map(headerName) : [];
+  // Account numbers, BSBs and references are numbers too, but never the amount.
+  const isId = (i: number) => /(account|bsb|number|no|cheque|serial|reference|ref|id|card)/.test(names[i] ?? "");
+  // A named debit or credit column can be empty in the sample (a page of only spending).
+  const isMoneyColumn = (i: number) => filled(i).length === 0 || isNumber(i);
+  const named = (role: Role, fits: (i: number) => boolean) => {
+    for (const name of HEADER_NAMES[role]) {
+      const i = names.indexOf(name);
+      if (i !== -1 && fits(i)) return i;
     }
-  } else {
-    // No names, so go by what the cells look like.
-    const indexes = Array.from({ length: width }, (_, i) => i);
-    const date = indexes.find((i) => share(column(i), (v) => parseDate(v) !== null) >= 0.8);
-    const numbers = indexes.filter((i) => i !== date && share(column(i), (v) => parseAmount(v) !== null) >= 0.8);
-    const letters = (i: number) => column(i).reduce((sum, v) => sum + (v.match(/[a-z]/gi)?.length ?? 0), 0);
-    const description = indexes.filter((i) => i !== date && !numbers.includes(i)).sort((a, b) => letters(b) - letters(a))[0];
-    if (date !== undefined && description !== undefined && numbers.length > 0) {
-      mapping = { hasHeader, date, description, amount: numbers[0], debit: null, credit: null, balance: numbers[1] ?? null };
-    }
-  }
-  if (!mapping) return null;
-  return { ...mapping, dateOrder: guessDateOrder(column(mapping.date)), flip: false };
+    return null;
+  };
+
+  const date = named("date", isDate) ?? indexes.find(isDate) ?? null;
+  if (date === null) return null;
+  const numbers = indexes.filter((i) => i !== date && isNumber(i) && !isId(i));
+
+  let amount = named("amount", isNumber);
+  let debit = named("debit", isMoneyColumn);
+  let credit = named("credit", isMoneyColumn);
+  if (amount !== null || debit === null || credit === null || (!isNumber(debit) && !isNumber(credit))) [debit, credit] = [null, null];
+  const balanceByName = named("balance", isNumber);
+  if (amount === null && debit === null) amount = numbers.find((i) => i !== balanceByName) ?? null;
+  if (amount === null && debit === null) return null;
+  // Without names, the number after the amount is usually the running balance (CommBank).
+  const balance = balanceByName ?? (hasHeader ? null : (numbers.find((i) => i !== amount) ?? null));
+
+  const used = new Set([date, amount, debit, credit, balance].filter((i) => i !== null));
+  const payee = named("payee", isText);
+  const description =
+    named("description", (i) => isText(i) || filled(i).length < column(i).length) ??
+    payee ??
+    indexes.filter((i) => !used.has(i) && !numbers.includes(i) && !isDate(i)).sort((a, b) => letters(b) - letters(a))[0] ??
+    null;
+  if (description === null) return null;
+
+  return {
+    hasHeader,
+    date,
+    description,
+    payee: payee !== description ? payee : null,
+    amount,
+    debit,
+    credit,
+    balance,
+    account: named("account", isText),
+    type: named("type", isText),
+    dateOrder: guessDateOrder(column(date)),
+    flip: false,
+  };
 }
+
+/** The description, with the payee in front when the description leaves them out (Up: "Transfer" to "Japan"). */
+function describe(description: string, payee: string) {
+  if (!payee) return description;
+  if (!description) return payee;
+  return description.toLowerCase().includes(payee.toLowerCase()) ? description : `${payee} · ${description}`;
+}
+
+const tidy = (text: string | undefined) => (text ?? "").replace(/\s+/g, " ").trim();
 
 /** The transactions in the file, plus how many rows couldn't be read. */
 export function readRows(rows: string[][], mapping: Mapping): { rows: CsvRow[]; unreadable: number } {
@@ -215,7 +266,7 @@ export function readRows(rows: string[][], mapping: Mapping): { rows: CsvRow[]; 
   let unreadable = 0;
   for (const r of rows.slice(mapping.hasHeader ? 1 : 0)) {
     const day = parseDate(r[mapping.date] ?? "", mapping.dateOrder);
-    const description = (r[mapping.description] ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
+    const description = describe(tidy(r[mapping.description]), mapping.payee !== null ? tidy(r[mapping.payee]) : "").slice(0, 300);
     let amount: number | null;
     if (mapping.amount !== null) amount = parseAmount(r[mapping.amount] ?? "");
     else {
@@ -228,11 +279,13 @@ export function readRows(rows: string[][], mapping: Mapping): { rows: CsvRow[]; 
       continue;
     }
     const amountCents = mapping.flip ? -amount : amount;
-    const key = `${day}|${amountCents}|${description}`;
+    const account = mapping.account !== null ? tidy(r[mapping.account]).slice(0, 60) || null : null;
+    const key = `${account}|${day}|${amountCents}|${description}`;
     const seq = seen.get(key) ?? 0;
     seen.set(key, seq + 1);
     const balance = mapping.balance !== null ? parseAmount(r[mapping.balance] ?? "") : null;
-    out.push({ day, amountCents, description, balanceCents: balance, seq });
+    const transfer = mapping.type !== null && OWN_ACCOUNT_TYPES.test(tidy(r[mapping.type]));
+    out.push({ day, amountCents, description, balanceCents: balance, account, transfer, seq });
   }
   return { rows: out, unreadable };
 }

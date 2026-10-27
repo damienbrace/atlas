@@ -21,7 +21,7 @@ import {
   type Range,
 } from "@/lib/money/periods";
 import { findRecurring } from "@/lib/money/recurring";
-import { MAX_CATEGORY, type Rule, type Transaction, type Upload } from "@/lib/money/types";
+import { isFixed, MAX_CATEGORY, type Rule, type Transaction, type Upload } from "@/lib/money/types";
 import { AskAtlas, ruleMatches } from "./ask-atlas";
 import { CategoryBars, MonthlyChart, Totals, UNSORTED } from "./overview";
 import { Repeats } from "./repeats";
@@ -115,7 +115,7 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
       return toast({ message: "Couldn't change that category" });
     }
     if (category === null) return refresh();
-    const others = transactions.filter((o) => o.id !== t.id && o.merchantKey === t.merchantKey && o.sortedBy !== "me" && o.category !== category);
+    const others = transactions.filter((o) => o.id !== t.id && o.merchantKey === t.merchantKey && !isFixed(o.sortedBy) && o.category !== category);
     if (others.length === 0) return toast({ message: `Moved to ${category}` });
     toast({
       message: `Moved to ${category}`,
@@ -130,7 +130,7 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
       toast({ message: "Couldn't save those rules" });
       return false;
     }
-    const sorted = new Set(drafts.flatMap((r) => ruleMatches(r, transactions).filter((t) => t.sortedBy !== "me").map((t) => t.id))).size;
+    const sorted = new Set(drafts.flatMap((r) => ruleMatches(r, transactions).filter((t) => !isFixed(t.sortedBy)).map((t) => t.id))).size;
     toast({ message: sorted ? `Sorted ${sorted} transaction${sorted === 1 ? "" : "s"}` : "Rule saved" });
     refresh();
     return true;

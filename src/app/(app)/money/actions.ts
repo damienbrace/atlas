@@ -48,7 +48,10 @@ function cleanRow(input: unknown): CsvRow | null {
   if (typeof amount !== "number" || !Number.isSafeInteger(amount) || Math.abs(amount) > MAX_AMOUNT) return null;
   if (balance !== null && (typeof balance !== "number" || !Number.isSafeInteger(balance) || Math.abs(balance) > MAX_AMOUNT)) return null;
   if (typeof r.seq !== "number" || !Number.isInteger(r.seq) || r.seq < 0 || r.seq > 999) return null;
-  return { day: r.day, amountCents: amount, description, balanceCents: balance as number | null, seq: r.seq };
+  const account = r.account === null || r.account === undefined ? null : cleanText(r.account, 60);
+  if (r.account && !account) return null;
+  if (r.transfer !== undefined && typeof r.transfer !== "boolean") return null;
+  return { day: r.day, amountCents: amount, description, balanceCents: balance as number | null, account, transfer: r.transfer === true, seq: r.seq };
 }
 
 async function isCategory(value: string) {

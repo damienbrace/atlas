@@ -18,13 +18,15 @@ interface Loaded {
 }
 
 const field = "h-10 w-full rounded-lg border border-line-strong bg-card px-3 text-[14.5px] text-ink outline-none focus:border-ink/40 [color-scheme:dark]";
-const ROLES: { id: "date" | "description" | "amount" | "debit" | "credit" | "balance"; label: string; optional?: boolean }[] = [
+const ROLES: { id: "date" | "description" | "payee" | "amount" | "debit" | "credit" | "balance" | "account"; label: string; optional?: boolean }[] = [
   { id: "date", label: "Date" },
   { id: "description", label: "Description" },
+  { id: "payee", label: "Payee, if it's separate", optional: true },
   { id: "amount", label: "Amount (one column, minus = money out)", optional: true },
   { id: "debit", label: "Or: money out column", optional: true },
   { id: "credit", label: "And: money in column", optional: true },
   { id: "balance", label: "Balance", optional: true },
+  { id: "account", label: "Account name, if the file has several", optional: true },
 ];
 
 interface UploadDialogProps {
@@ -66,6 +68,11 @@ export function UploadDialog({ open, onClose, accounts, uploads, onDone, onRemov
 
   const parsed = loaded?.mapping ? readRows(loaded.cells, loaded.mapping) : null;
   const days = parsed?.rows.map((r) => r.day).sort() ?? [];
+  // Accounts the file names itself (Up exports Spending and every saver together), busiest first.
+  const fileAccounts = Object.entries(
+    (parsed?.rows ?? []).reduce<Record<string, number>>((all, r) => (r.account ? { ...all, [r.account]: (all[r.account] ?? 0) + 1 } : all), {}),
+  ).sort((a, b) => b[1] - a[1]);
+  const ownMoves = parsed?.rows.filter((r) => r.transfer).length ?? 0;
 
   function setMapping(patch: Partial<Mapping>) {
     if (!loaded) return;
@@ -73,10 +80,13 @@ export function UploadDialog({ open, onClose, accounts, uploads, onDone, onRemov
       hasHeader: false,
       date: 0,
       description: 1,
+      payee: null,
       amount: 2,
       debit: null,
       credit: null,
       balance: null,
+      account: null,
+      type: null,
       dateOrder: "dmy",
       flip: false,
     };
@@ -89,7 +99,8 @@ export function UploadDialog({ open, onClose, accounts, uploads, onDone, onRemov
 
   async function add() {
     if (!loaded || !parsed || parsed.rows.length === 0) return;
-    const name = account.trim();
+    // When the file names accounts, its busiest one labels the upload (and any row without one).
+    const name = fileAccounts[0]?.[0] ?? account.trim();
     if (!name) return setError("Name the account, e.g. Everyday.");
     setError(null);
     try {
@@ -171,15 +182,26 @@ export function UploadDialog({ open, onClose, accounts, uploads, onDone, onRemov
             </button>
           </div>
 
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[13px] text-muted">Account</span>
-            <input list="money-accounts" value={account} onChange={(e) => setAccount(e.target.value)} maxLength={60} className={field} />
-            <datalist id="money-accounts">
-              {accounts.map((a) => (
-                <option key={a} value={a} />
-              ))}
-            </datalist>
-          </label>
+          {fileAccounts.length > 0 ? (
+            <p className="text-[14px] text-ink-soft">
+              <span className="text-muted">Accounts from the file: </span>
+              {fileAccounts
+                .slice(0, 3)
+                .map(([name]) => name)
+                .join(", ")}
+              {fileAccounts.length > 3 && ` and ${fileAccounts.length - 3} more`}
+            </p>
+          ) : (
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[13px] text-muted">Account</span>
+              <input list="money-accounts" value={account} onChange={(e) => setAccount(e.target.value)} maxLength={60} className={field} />
+              <datalist id="money-accounts">
+                {accounts.map((a) => (
+                  <option key={a} value={a} />
+                ))}
+              </datalist>
+            </label>
+          )}
 
           {parsed && !editColumns && (
             <div className="text-[14px]">
@@ -193,6 +215,11 @@ export function UploadDialog({ open, onClose, accounts, uploads, onDone, onRemov
                 )}
               </p>
               {parsed.unreadable > 0 && <p className="mt-1 text-[13px] text-amber">{parsed.unreadable} rows couldn&apos;t be read and will be left out.</p>}
+              {ownMoves > 0 && (
+                <p className="mt-1 text-[13px] text-muted">
+                  {ownMoves.toLocaleString("en-AU")} are moves between your own accounts, so they go straight into Transfers.
+                </p>
+              )}
               <p className="mt-1 text-[13px] text-muted">Check money out shows as minus and money in as plus:</p>
               <ul className="mt-2 divide-y divide-line rounded-lg border border-line">
                 {parsed.rows.slice(0, 4).map((r, i) => (

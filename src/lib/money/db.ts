@@ -4,10 +4,11 @@ import { sql } from "@/lib/db";
 import { getSetting, setSetting } from "@/lib/life/settings";
 import type { CsvRow } from "./csv";
 import { merchantKey } from "./merchant";
-import { DEFAULT_CATEGORIES, type Rule, type SortedBy, type Transaction, type Upload } from "./types";
+import { DEFAULT_CATEGORIES, TRANSFERS, type Rule, type SortedBy, type Transaction, type Upload } from "./types";
 
-// Money's storage. Sorting works in layers: my own picks ('me') beat rules, rules beat
-// Atlas's read of the merchant. `resort` recomputes everything that isn't mine.
+// Money's storage. Sorting works in layers: my own picks ('me') and moves the bank's file
+// marked as between my accounts ('bank') beat rules, and rules beat Atlas's read of the
+// merchant. `resort` recomputes everything else.
 
 interface TransactionRow {
   id: string;
@@ -21,7 +22,7 @@ interface TransactionRow {
   sorted_by: string | null;
 }
 
-const isSortedBy = (v: string | null): v is SortedBy => v === "atlas" || v === "rule" || v === "me";
+const isSortedBy = (v: string | null): v is SortedBy => v === "atlas" || v === "rule" || v === "me" || v === "bank";
 
 const toTransaction = (r: TransactionRow): Transaction => ({
   id: r.id,
@@ -89,20 +90,24 @@ function transactionId(account: string, row: CsvRow) {
   return createHash("sha256").update(`${account}|${row.day}|${row.amountCents}|${row.description}|${row.seq}`).digest("hex").slice(0, 32);
 }
 
-/** Adds a chunk of an upload's rows; returns how many were new. */
+/** Adds a chunk of an upload's rows (each in its own account if the file named one); returns how many were new. */
 export async function addTransactions(uploadId: string, account: string, rows: CsvRow[]) {
   const records = rows.map((r) => ({
-    id: transactionId(account, r),
+    id: transactionId(r.account ?? account, r),
+    account: r.account ?? account,
     day: r.day,
     amount_cents: r.amountCents,
     description: r.description,
     merchant_key: merchantKey(r.description),
     balance_cents: r.balanceCents,
+    transfer: r.transfer,
   }));
   const added = await sql<{ id: string }[]>`
-    INSERT INTO money_transactions (id, account, day, amount_cents, description, merchant_key, balance_cents, import_id, created_at)
-    SELECT r.id, ${account}, r.day, r.amount_cents, r.description, r.merchant_key, r.balance_cents, ${uploadId}, ${Date.now()}
-    FROM jsonb_to_recordset(${sql.json(records)}) AS r(id text, day text, amount_cents bigint, description text, merchant_key text, balance_cents bigint)
+    INSERT INTO money_transactions (id, account, day, amount_cents, description, merchant_key, balance_cents, import_id, created_at, category, sorted_by)
+    SELECT r.id, r.account, r.day, r.amount_cents, r.description, r.merchant_key, r.balance_cents, ${uploadId}, ${Date.now()},
+      CASE WHEN r.transfer THEN ${TRANSFERS} END, CASE WHEN r.transfer THEN 'bank' END
+    FROM jsonb_to_recordset(${sql.json(records)})
+      AS r(id text, account text, day text, amount_cents bigint, description text, merchant_key text, balance_cents bigint, transfer boolean)
     ON CONFLICT (id) DO NOTHING
     RETURNING id`;
   if (added.length) await sql`UPDATE money_imports SET added = added + ${added.length} WHERE id = ${uploadId}`;
@@ -132,7 +137,7 @@ export async function resort() {
           ORDER BY r.amount_cents IS NULL, length(r.pattern) DESC, r.created_at DESC LIMIT 1) AS rule_category,
         m.category AS atlas_category
       FROM money_transactions t LEFT JOIN money_merchants m ON m.key = t.merchant_key
-      WHERE t.sorted_by IS DISTINCT FROM 'me'
+      WHERE t.sorted_by IS DISTINCT FROM 'me' AND t.sorted_by IS DISTINCT FROM 'bank'
     ), picked AS (
       SELECT id, coalesce(rule_category, atlas_category) AS category,
         CASE WHEN rule_category IS NOT NULL THEN 'rule' WHEN atlas_category IS NOT NULL THEN 'atlas' END AS sorted_by

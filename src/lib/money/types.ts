@@ -16,7 +16,11 @@ export interface Transaction {
   sortedBy: SortedBy | null;
 }
 
-export type SortedBy = "atlas" | "rule" | "me";
+/** Who put a transaction in its category. "bank" is the export itself marking a move between my own accounts. */
+export type SortedBy = "atlas" | "rule" | "me" | "bank";
+
+/** Picks that rules and Atlas leave alone. */
+export const isFixed = (sortedBy: SortedBy | null) => sortedBy === "me" || sortedBy === "bank";
 
 export interface Rule {
   id: string;
