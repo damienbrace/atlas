@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Sparkle } from "@/components/sparkle";
+import { linkLabel } from "@/lib/format";
 import type { HermesBrief } from "@/lib/hermes";
 import { HideButton, Show } from "./brief-layout";
 
@@ -16,10 +17,12 @@ function inline(text: string): ReactNode[] {
     out.push(text.slice(last, m.index));
     const url = m[3] ?? m[4];
     if (m[1]) out.push(<strong key={m.index} className="font-semibold">{m[1]}</strong>);
+    // A malformed address (e.g. "https://[x") stays as plain text rather than breaking the page.
+    else if (!URL.canParse(url!)) out.push(m[0]);
     else
       out.push(
         <a key={m.index} href={url} target="_blank" rel="noopener noreferrer nofollow" className="text-teal underline-offset-2 hover:underline">
-          {m[2] ?? new URL(url!).hostname.replace(/^www\./, "")}
+          {m[2] ?? linkLabel(url!)}
         </a>,
       );
     last = m.index! + m[0].length;
