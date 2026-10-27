@@ -20,6 +20,8 @@ export const env = {
   ownerEmail: (process.env.OWNER_EMAIL ?? "").trim().toLowerCase(),
   /** Shared with the scheduled jobs (Supabase cron) that call /api/cron/*. */
   cronSecret: process.env.CRON_SECRET ?? "",
+  /** Shared with Hermes (Damien's assistant), which posts its morning brief to /api/hermes/*. */
+  hermesSecret: process.env.HERMES_SECRET ?? "",
 };
 
 export const googleConfigured = () => Boolean(env.googleClientId && env.googleClientSecret && env.sessionSecret);

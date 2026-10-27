@@ -13,6 +13,6 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   // Open without a session: the sign-in page and flow, the scheduled jobs (they carry
-  // CRON_SECRET), and what a phone needs to install the app (manifest, icons, service worker).
-  matcher: ["/((?!signin|api/auth/|api/cron/|_next/static|_next/image|manifest\\.webmanifest|icons/|icon\\.svg|sw\\.js).*)"],
+  // CRON_SECRET), Hermes (it carries HERMES_SECRET), and what a phone needs to install the app (manifest, icons, service worker).
+  matcher: ["/((?!signin|api/auth/|api/cron/|api/hermes/|_next/static|_next/image|manifest\\.webmanifest|icons/|icon\\.svg|sw\\.js).*)"],
 };

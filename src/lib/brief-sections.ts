@@ -2,6 +2,7 @@
 
 export const BRIEF_SECTIONS = [
   { id: "summary", label: "Atlas summary" },
+  { id: "hermes", label: "Hermes brief" },
   { id: "weather", label: "Weather" },
   { id: "today", label: "Today's calendar" },
   { id: "needs", label: "Needs you" },

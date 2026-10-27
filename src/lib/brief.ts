@@ -14,6 +14,7 @@ import { isBriefSection, type BriefSection } from "@/lib/brief-sections";
 import { firstPage } from "@/lib/mail/inbox";
 import { startSync, syncStatus } from "@/lib/mail/sync";
 import { getWeather, type Weather } from "@/lib/weather";
+import { getHermesBrief, type HermesBrief } from "@/lib/hermes";
 
 // Everything the Brief (home screen) shows, gathered in one pass on the server.
 
@@ -31,6 +32,8 @@ export interface BriefData {
   habitsDone: string[];
   journalWords: number | null;
   tasks: Task[];
+  /** Hermes's morning brief, if it has sent one (shown for the day it was written). */
+  hermes: HermesBrief | null;
   /** Parts of the Brief you've hidden. */
   hidden: BriefSection[];
 }
@@ -67,7 +70,7 @@ export async function buildBrief(session: { email: string; refreshToken: string;
   const now = new Date();
   const today = dayKey(now);
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const [weather, calendar, inbox, sync, { habits, done }, entries, tasks, hidden] = await Promise.all([
+  const [weather, calendar, inbox, sync, { habits, done }, entries, tasks, hidden, hermes] = await Promise.all([
     getWeather(),
     session ? todaysEvents(session.refreshToken, session.scopes, today) : Promise.resolve({ status: "not-connected" as const, events: [] }),
     session ? firstPage() : Promise.resolve(null),
@@ -76,6 +79,7 @@ export async function buildBrief(session: { email: string; refreshToken: string;
     listEntries(),
     briefTasks(today, todayStart),
     getSetting<unknown[]>("brief.hidden", []),
+    getHermesBrief(),
   ]);
 
   const emails = inbox?.emails ?? [];
@@ -99,6 +103,7 @@ export async function buildBrief(session: { email: string; refreshToken: string;
     habitsDone,
     journalWords: entry?.body.trim() ? entry.body.trim().split(/\s+/).length : null,
     tasks,
+    hermes,
     hidden: hidden.filter(isBriefSection),
   };
 }

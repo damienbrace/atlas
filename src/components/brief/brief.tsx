@@ -11,6 +11,7 @@ import { longDay } from "@/lib/life/days";
 import type { Weather } from "@/lib/weather";
 import { BriefLayout, Card, CustomiseButton, HideButton, NothingShown, Show, Summary } from "./brief-layout";
 import { BriefHabits, BriefTasks } from "./brief-lists";
+import { HermesBriefCard } from "./hermes-brief";
 import { NotifyButton } from "./notify-button";
 
 // The home screen: today at a glance. Rendered on the server; ticks and the show/hide
@@ -67,6 +68,8 @@ export function Brief({ data, pushKey }: { data: BriefData; pushKey: string }) {
               <HideButton id="summary" />
             </section>
           </Show>
+
+          {data.hermes && <HermesBriefCard brief={data.hermes} today={data.today} />}
 
           <NothingShown />
 
