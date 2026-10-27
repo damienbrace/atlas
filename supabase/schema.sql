@@ -139,6 +139,52 @@ create table if not exists push_subscriptions (
   created_at bigint not null
 );
 
+-- ---- Money (bank CSV uploads) -----------------------------------------------
+
+-- One row per bank transaction. The id is a hash of account, day, amount, description
+-- and repeat number, so uploading overlapping CSVs never double-counts.
+create table if not exists money_transactions (
+  id text primary key,
+  account text not null,
+  day text not null,                  -- local date, YYYY-MM-DD
+  amount_cents bigint not null,       -- negative = money out
+  description text not null,          -- as the bank wrote it
+  merchant_key text not null,         -- description without numbers or noise, for sorting
+  category text,                      -- null until sorted
+  sorted_by text,                     -- 'atlas', 'rule' or 'me'
+  balance_cents bigint,
+  import_id text not null,
+  created_at bigint not null
+);
+create index if not exists money_transactions_day on money_transactions (day);
+create index if not exists money_transactions_key on money_transactions (merchant_key);
+
+-- Atlas's read of each merchant, so each one only goes to Claude once.
+create table if not exists money_merchants (
+  key text primary key,
+  name text not null,
+  category text not null,
+  created_at bigint not null
+);
+
+-- Sorting rules: a merchant containing `pattern` (and, if set, this exact amount) goes in `category`.
+create table if not exists money_rules (
+  id text primary key,
+  pattern text not null,              -- normalised like merchant_key
+  category text not null,
+  amount_cents bigint,                -- optional: only this amount, either direction
+  created_at bigint not null
+);
+
+create table if not exists money_imports (
+  id text primary key,
+  file_name text not null,
+  account text not null,
+  rows integer not null default 0,    -- transactions in the file
+  added integer not null default 0,   -- new ones (the rest were already in Atlas)
+  created_at bigint not null
+);
+
 -- ---- Lock the public API out ------------------------------------------------
 
 alter table journal enable row level security;
@@ -155,3 +201,7 @@ alter table overrides enable row level security;
 alter table google_account enable row level security;
 alter table push_subscriptions enable row level security;
 alter table task_suggestions enable row level security;
+alter table money_transactions enable row level security;
+alter table money_merchants enable row level security;
+alter table money_rules enable row level security;
+alter table money_imports enable row level security;

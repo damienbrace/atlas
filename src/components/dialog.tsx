@@ -3,7 +3,19 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
 /** Modal on the native <dialog>: focus trapping, Esc to close and a backdrop come built in. */
-export function Dialog({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
+export function Dialog({
+  open,
+  onClose,
+  title,
+  children,
+  width = 460,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: ReactNode;
+  width?: number;
+}) {
   const ref = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -20,7 +32,8 @@ export function Dialog({ open, onClose, title, children }: { open: boolean; onCl
       onClose={onClose}
       // A click on the dialog element itself (not its content) is a click on the backdrop.
       onClick={(e) => e.target === ref.current && onClose()}
-      className="m-auto w-[min(460px,calc(100vw-32px))] rounded-2xl border border-line-strong bg-raised p-0 text-ink shadow-2xl shadow-black/60 backdrop:bg-black/60"
+      style={{ width: `min(${width}px, calc(100vw - 32px))` }}
+      className="m-auto max-h-[calc(100dvh-32px)] overflow-y-auto rounded-2xl border border-line-strong bg-raised p-0 text-ink shadow-2xl shadow-black/60 backdrop:bg-black/60"
     >
       {open && <div className="p-6">{children}</div>}
     </dialog>

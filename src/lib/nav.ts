@@ -29,7 +29,7 @@ export const SECTIONS: Section[] = [
   { slug: "habits", label: "Habits", icon: Flame, blurb: "Daily habits, ticked off and kept as streaks." },
   { slug: "tasks", label: "Tasks", icon: SquareCheck, blurb: "Everything to do, from typing, voice notes and email." },
   { slug: "notes", label: "Notes", icon: FileText, blurb: "Notes and voice memos, searchable in plain English." },
-  { slug: "money", label: "Money", icon: ChartColumn, blurb: "Net position, spending by business, bills and subscriptions." },
+  { slug: "money", label: "Money", icon: ChartColumn, blurb: "Personal spending from bank CSVs, sorted by Atlas." },
   { slug: "decisions", label: "Decisions", icon: GitFork, blurb: "Big calls logged with a prediction, scored six months later." },
   { slug: "review", label: "Review", icon: History, blurb: "Planned vs actual time, wins and slips for the week." },
 ];
