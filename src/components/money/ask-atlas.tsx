@@ -5,9 +5,8 @@ import { useState, type FormEvent } from "react";
 import { askAtlasToSort, sortWithAtlas } from "@/app/(app)/money/actions";
 import { Sparkle } from "@/components/sparkle";
 import { useToast } from "@/components/toast";
-import { normalise, patternMatches } from "@/lib/money/merchant";
+import { merchantName, normalise, patternMatches } from "@/lib/money/merchant";
 import { money, type Rule, type Transaction } from "@/lib/money/types";
-import { merchantName } from "./transactions";
 
 // Atlas's part of the Money page: sorting merchants it hasn't seen, and turning
 // "Caltex and BP are fuel" into rules that wait for Approve / Edit / Dismiss.

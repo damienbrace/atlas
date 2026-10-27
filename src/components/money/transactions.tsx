@@ -1,11 +1,12 @@
 "use client";
 
-import { Download, Search, X } from "lucide-react";
+import { Download } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Sparkle } from "@/components/sparkle";
 import { shortDay } from "@/lib/life/days";
-import { titleCase } from "@/lib/money/merchant";
+import { merchantName } from "@/lib/money/merchant";
 import { money, type Transaction } from "@/lib/money/types";
+import { MerchantSearch } from "./merchant-search";
 import { UNSORTED } from "./overview";
 
 // The list under the overview: every transaction in the period, narrowed by the
@@ -17,7 +18,7 @@ export interface ListFilters {
   direction: "all" | "out" | "in";
   min: string;
   max: string;
-  /** One merchant's transactions (a merchant key), e.g. from Repeat charges. */
+  /** One business, by its shown name (picked in the search, or from Repeat charges). */
   merchant: string | null;
 }
 
@@ -33,7 +34,7 @@ export function listFilter(f: ListFilters) {
   const min = dollars(f.min);
   const max = dollars(f.max);
   return (t: Transaction) => {
-    if (f.merchant && t.merchantKey !== f.merchant) return false;
+    if (f.merchant && merchantName(t) !== f.merchant) return false;
     if (q && ![t.merchant, t.description, t.category].some((field) => field?.toLowerCase().includes(q))) return false;
     if (f.category === UNSORTED ? t.category !== null : f.category !== null && t.category !== f.category) return false;
     if (f.direction === "out" && t.amountCents >= 0) return false;
@@ -42,8 +43,6 @@ export function listFilter(f: ListFilters) {
     return (min === null || size >= min) && (max === null || size <= max);
   };
 }
-
-export const merchantName = (t: Transaction) => t.merchant ?? titleCase(t.merchantKey);
 
 type Sort = "newest" | "oldest" | "out" | "in";
 const SORTS: { id: Sort; label: string }[] = [
@@ -77,6 +76,8 @@ export function TransactionList({ transactions, filters, onFilters, categories, 
   const [sort, setSort] = useState<Sort>("newest");
   const [shown, setShown] = useState(PAGE);
   const rows = transactions.filter(listFilter(filters)).sort(SORTERS[sort]);
+  // Suggest businesses that fit the other filters, so a pick never comes up empty.
+  const suggestFrom = transactions.filter(listFilter({ ...filters, query: "", merchant: null }));
   const total = rows.reduce((sum, t) => sum + t.amountCents, 0);
   const filtered = JSON.stringify(filters) !== JSON.stringify(NO_FILTERS);
   const set = (patch: Partial<ListFilters>) => {
@@ -109,21 +110,13 @@ export function TransactionList({ transactions, filters, onFilters, categories, 
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <label className="flex h-9 min-w-0 flex-1 basis-56 items-center gap-2 rounded-lg border border-line-strong px-2.5 focus-within:border-ink/40">
-            <Search className="size-4 shrink-0 text-faint" />
-            <input
-              value={filters.query}
-              onChange={(e) => set({ query: e.target.value })}
-              placeholder="Search merchant or description"
-              aria-label="Search transactions"
-              className="min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-faint"
-            />
-            {filters.query && (
-              <button type="button" aria-label="Clear search" onClick={() => set({ query: "" })} className="text-faint hover:text-ink">
-                <X className="size-4" />
-              </button>
-            )}
-          </label>
+          <MerchantSearch
+            transactions={suggestFrom}
+            query={filters.query}
+            merchant={filters.merchant}
+            onQuery={(query) => set({ query })}
+            onMerchant={(merchant) => set({ merchant, query: "" })}
+          />
           <select aria-label="Category" value={filters.category ?? ""} onChange={(e) => set({ category: e.target.value || null })} className={control}>
             <option value="">All categories</option>
             <option value={UNSORTED}>Not sorted yet</option>

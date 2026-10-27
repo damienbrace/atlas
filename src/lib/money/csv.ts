@@ -200,7 +200,7 @@ export function detectMapping(rows: string[][]): Mapping | null {
   // A named column only counts if its cells look right, so a mislabelled export can't fool it.
   const names = hasHeader ? first.map(headerName) : [];
   // Account numbers, BSBs and references are numbers too, but never the amount.
-  const isId = (i: number) => /(account|bsb|number|no|cheque|serial|reference|ref|id|card)/.test(names[i] ?? "");
+  const isId = (i: number) => /\b(account|bsb|number|no|cheque|serial|reference|ref|id|card)\b/.test(names[i] ?? "");
   // A named debit or credit column can be empty in the sample (a page of only spending).
   const isMoneyColumn = (i: number) => filled(i).length === 0 || isNumber(i);
   const named = (role: Role, fits: (i: number) => boolean) => {

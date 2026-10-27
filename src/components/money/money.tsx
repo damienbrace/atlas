@@ -1,13 +1,13 @@
 "use client";
 
-import { FileUp, X } from "lucide-react";
+import { FileUp } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition, type FormEvent } from "react";
 import { approveRules, categorise, createCategory, removeRule } from "@/app/(app)/money/actions";
 import { Dialog } from "@/components/dialog";
 import { useToast } from "@/components/toast";
 import { addDays, shortDay } from "@/lib/life/days";
-import { normalise, patternMatches } from "@/lib/money/merchant";
+import { merchantName, normalise, patternMatches } from "@/lib/money/merchant";
 import {
   inRange,
   monthEnd,
@@ -25,7 +25,7 @@ import { isFixed, MAX_CATEGORY, type Rule, type Transaction, type Upload } from 
 import { AskAtlas, ruleMatches } from "./ask-atlas";
 import { CategoryBars, MonthlyChart, Totals, UNSORTED } from "./overview";
 import { Repeats } from "./repeats";
-import { merchantName, NO_FILTERS, TransactionList, type ListFilters } from "./transactions";
+import { NO_FILTERS, TransactionList, type ListFilters } from "./transactions";
 import { UploadDialog } from "./upload-dialog";
 
 // The Money page: personal spending from bank CSVs. Everything is loaded once and
@@ -289,18 +289,6 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
               />
             </div>
             <div id="money-transactions" className="order-4 scroll-mt-4">
-              {filters.merchant && (
-                <p className="mb-2 flex items-center gap-2 px-1 text-[13.5px] text-muted">
-                  Showing one merchant
-                  <button
-                    type="button"
-                    onClick={() => setFilters((f) => ({ ...f, merchant: null }))}
-                    className="flex items-center gap-1 rounded-md border border-line-strong px-2 py-0.5 text-ink-soft hover:text-ink"
-                  >
-                    {merchantName(transactions.find((t) => t.merchantKey === filters.merchant) ?? transactions[0])} <X className="size-3.5" />
-                  </button>
-                </p>
-              )}
               <TransactionList
                 transactions={inPeriod}
                 filters={filters}
@@ -332,7 +320,7 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
                 items={recurring}
                 onPick={(r) => {
                   setPeriod("all");
-                  showTransactions({ merchant: r.key });
+                  showTransactions({ merchant: r.name });
                 }}
               />
             </div>

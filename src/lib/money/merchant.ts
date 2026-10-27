@@ -1,3 +1,5 @@
+import type { Transaction } from "./types";
+
 // Turning bank descriptions into something sortable. Safe in the browser and on the server.
 //
 //   "WOOLWORTHS 1234 BUNBURY AU Card xx4821 Value Date: 03/10/2026"
@@ -44,3 +46,6 @@ export function patternMatches(pattern: string, key: string) {
 export function titleCase(key: string) {
   return key.toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase());
 }
+
+/** The business as shown: Atlas's name for it ("Woolworths"), or the tidied description until it has one. */
+export const merchantName = (t: Transaction) => t.merchant ?? titleCase(t.merchantKey);
