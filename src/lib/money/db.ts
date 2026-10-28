@@ -4,7 +4,7 @@ import { sql } from "@/lib/db";
 import { getSetting, setSetting } from "@/lib/life/settings";
 import type { CsvRow } from "./csv";
 import { merchantKey } from "./merchant";
-import { DEFAULT_CATEGORIES, TRANSFERS, type Rule, type SortedBy, type Transaction, type Upload } from "./types";
+import { DEFAULT_CATEGORIES, TRANSFERS, type Rule, type SortedBy, type SplitPart, type Transaction, type Upload } from "./types";
 
 // Money's storage. Sorting works in layers: my own picks ('me') and moves the bank's file
 // marked as between my accounts ('bank') beat rules, and rules beat Atlas's read of the
@@ -20,6 +20,7 @@ interface TransactionRow {
   merchant: string | null;
   category: string | null;
   sorted_by: string | null;
+  splits: SplitPart[] | null;
 }
 
 const isSortedBy = (v: string | null): v is SortedBy => v === "atlas" || v === "rule" || v === "me" || v === "bank";
@@ -34,6 +35,7 @@ const toTransaction = (r: TransactionRow): Transaction => ({
   merchant: r.merchant,
   category: r.category,
   sortedBy: isSortedBy(r.sorted_by) ? r.sorted_by : null,
+  splits: r.splits,
 });
 
 /** Plenty for years of personal spending; the page filters it in the browser. */
@@ -41,7 +43,7 @@ const MAX_LOADED = 25_000;
 
 export async function listTransactions() {
   const rows = await sql<TransactionRow[]>`
-    SELECT t.id, t.account, t.day, t.amount_cents, t.description, t.merchant_key, m.name AS merchant, t.category, t.sorted_by
+    SELECT t.id, t.account, t.day, t.amount_cents, t.description, t.merchant_key, m.name AS merchant, t.category, t.sorted_by, t.splits
     FROM money_transactions t LEFT JOIN money_merchants m ON m.key = t.merchant_key
     ORDER BY t.day DESC, t.created_at DESC, t.id LIMIT ${MAX_LOADED}`;
   return rows.map(toTransaction);
@@ -204,11 +206,27 @@ export async function transactionSpan() {
 /** My own pick for these transactions; null hands them back to rules and Atlas. */
 export async function setCategory(ids: string[], category: string | null) {
   if (category === null) {
-    await sql`UPDATE money_transactions SET category = NULL, sorted_by = NULL WHERE id IN (SELECT jsonb_array_elements_text(${sql.json(ids)}))`;
+    await sql`UPDATE money_transactions SET category = NULL, sorted_by = NULL, splits = NULL WHERE id IN (SELECT jsonb_array_elements_text(${sql.json(ids)}))`;
     await resort();
   } else {
-    await sql`UPDATE money_transactions SET category = ${category}, sorted_by = 'me' WHERE id IN (SELECT jsonb_array_elements_text(${sql.json(ids)}))`;
+    await sql`UPDATE money_transactions SET category = ${category}, sorted_by = 'me', splits = NULL WHERE id IN (SELECT jsonb_array_elements_text(${sql.json(ids)}))`;
   }
+}
+
+export async function transactionAmounts(ids: string[]) {
+  return sql<{ id: string; amount_cents: number }[]>`
+    SELECT id, amount_cents FROM money_transactions WHERE id IN (SELECT jsonb_array_elements_text(${sql.json(ids)}))`;
+}
+
+/**
+ * Splits payments across categories, as my own pick. `category` is the biggest part's.
+ * Parts are typed inline because sql.json won't take an interface (no index signature).
+ */
+export async function setSplits(items: { id: string; category: string; splits: { category: string; cents: number }[] }[]) {
+  await sql`
+    UPDATE money_transactions t SET category = d.category, sorted_by = 'me', splits = d.splits
+    FROM jsonb_to_recordset(${sql.json(items)}) AS d(id text, category text, splits jsonb)
+    WHERE t.id = d.id`;
 }
 
 export async function addRules(rules: Omit<Rule, "id">[]) {

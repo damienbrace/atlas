@@ -1,10 +1,11 @@
 "use client";
 
-import { Download, X } from "lucide-react";
+import { Download, Split, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Sparkle } from "@/components/sparkle";
 import { shortDay } from "@/lib/life/days";
 import { merchantName } from "@/lib/money/merchant";
+import { amountIn, describeSplit } from "@/lib/money/split";
 import { money, type Transaction } from "@/lib/money/types";
 import { MerchantSearch } from "./merchant-search";
 import { UNSORTED } from "./overview";
@@ -40,7 +41,8 @@ export function listFilter(f: ListFilters) {
     if (atlas && !atlas.has(t.id)) return false;
     if (f.merchant && merchantName(t) !== f.merchant) return false;
     if (q && ![t.merchant, t.description, t.category].some((field) => field?.toLowerCase().includes(q))) return false;
-    if (f.category === UNSORTED ? t.category !== null : f.category !== null && t.category !== f.category) return false;
+    if (f.category === UNSORTED ? t.category !== null : f.category !== null && t.category !== f.category && !t.splits?.some((p) => p.category === f.category))
+      return false;
     if (f.direction === "out" && t.amountCents >= 0) return false;
     if (f.direction === "in" && t.amountCents <= 0) return false;
     const size = Math.abs(t.amountCents);
@@ -74,15 +76,18 @@ interface TransactionListProps {
   thisYear: string;
   onCategorise: (t: Transaction, category: string | null) => void;
   onNewCategory: (t: Transaction) => void;
+  onSplit: (t: Transaction) => void;
 }
 
-export function TransactionList({ transactions, filters, onFilters, categories, thisYear, onCategorise, onNewCategory }: TransactionListProps) {
+export function TransactionList({ transactions, filters, onFilters, categories, thisYear, onCategorise, onNewCategory, onSplit }: TransactionListProps) {
   const [sort, setSort] = useState<Sort>("newest");
   const [shown, setShown] = useState(PAGE);
   const rows = transactions.filter(listFilter(filters)).sort(SORTERS[sort]);
   // Suggest businesses that fit the other filters, so a pick never comes up empty.
   const suggestFrom = transactions.filter(listFilter({ ...filters, query: "", merchant: null }));
-  const total = rows.reduce((sum, t) => sum + t.amountCents, 0);
+  // Filtered to a category, a split payment counts only its part in that category.
+  const share = filters.category === UNSORTED ? null : filters.category;
+  const total = rows.reduce((sum, t) => sum + amountIn(t, share), 0);
   const filtered = JSON.stringify(filters) !== JSON.stringify(NO_FILTERS);
   const set = (patch: Partial<ListFilters>) => {
     onFilters({ ...filters, ...patch });
@@ -94,7 +99,7 @@ export function TransactionList({ transactions, filters, onFilters, categories, 
     const lines = [
       "Date,Merchant,Category,Amount,Description,Account",
       ...rows.map((t) =>
-        [t.day, merchantName(t), t.category ?? "", (t.amountCents / 100).toFixed(2), t.description, t.account].map(cell).join(","),
+        [t.day, merchantName(t), t.splits ? describeSplit(t) : (t.category ?? ""), (t.amountCents / 100).toFixed(2), t.description, t.account].map(cell).join(","),
       ),
     ];
     const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
@@ -185,7 +190,16 @@ export function TransactionList({ transactions, filters, onFilters, categories, 
       ) : (
         <ul className="divide-y divide-line">
           {rows.slice(0, shown).map((t) => (
-            <Row key={t.id} t={t} categories={categories} thisYear={thisYear} onCategorise={onCategorise} onNewCategory={onNewCategory} />
+            <Row
+              key={t.id}
+              t={t}
+              share={share}
+              categories={categories}
+              thisYear={thisYear}
+              onCategorise={onCategorise}
+              onNewCategory={onNewCategory}
+              onSplit={onSplit}
+            />
           ))}
         </ul>
       )}
@@ -201,18 +215,23 @@ export function TransactionList({ transactions, filters, onFilters, categories, 
 }
 
 const NEW_CATEGORY = "__new";
+const SPLIT = "__split";
 
 interface RowProps {
   t: Transaction;
+  /** The category the list is filtered to, if any: a split payment then shows only its part in it. */
+  share: string | null;
   categories: string[];
   thisYear: string;
   onCategorise: (t: Transaction, category: string | null) => void;
   onNewCategory: (t: Transaction) => void;
+  onSplit: (t: Transaction) => void;
 }
 
-function Row({ t, categories, thisYear, onCategorise, onNewCategory }: RowProps) {
+function Row({ t, share, categories, thisYear, onCategorise, onNewCategory, onSplit }: RowProps) {
   const date = t.day.startsWith(thisYear) ? shortDay(t.day) : `${shortDay(t.day)} ${t.day.slice(0, 4)}`;
   const name = merchantName(t);
+  const shown = amountIn(t, share);
   return (
     <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 px-4 py-3 sm:grid-cols-[5.75rem_minmax(0,1fr)_10.5rem_7rem] md:px-5">
       <span className="hidden text-[13.5px] text-muted tabular-nums sm:block">{date}</span>
@@ -231,14 +250,30 @@ function Row({ t, categories, thisYear, onCategorise, onNewCategory }: RowProps)
             <span className="sr-only">Sorted by Atlas</span>
           </span>
         )}
-        <CategorySelect
-          value={t.category}
-          categories={categories}
-          label={`Category for ${name}`}
-          onChange={(value) => (value === NEW_CATEGORY ? onNewCategory(t) : onCategorise(t, value))}
-        />
+        {t.splits ? (
+          <button
+            type="button"
+            onClick={() => onSplit(t)}
+            title={describeSplit(t)}
+            aria-label={`Split: ${describeSplit(t)}. Change the split for ${name}`}
+            className="flex h-8 w-full max-w-[10.5rem] min-w-0 items-center gap-1.5 rounded-full border border-line-strong bg-card px-2.5 text-[13px] text-ink-soft hover:border-faint"
+          >
+            <Split className="size-3.5 shrink-0 text-muted" />
+            <span className="truncate">{t.splits.map((p) => p.category).join(" + ")}</span>
+          </button>
+        ) : (
+          <CategorySelect
+            value={t.category}
+            categories={categories}
+            label={`Category for ${name}`}
+            onChange={(value) => (value === NEW_CATEGORY ? onNewCategory(t) : value === SPLIT ? onSplit(t) : onCategorise(t, value))}
+          />
+        )}
       </span>
-      <span className={`text-right text-[15px] tabular-nums ${t.amountCents > 0 ? "text-green" : "text-ink"}`}>{money(t.amountCents, { sign: true })}</span>
+      <span className={`text-right text-[15px] tabular-nums ${t.amountCents > 0 ? "text-green" : "text-ink"}`}>
+        {money(shown, { sign: true })}
+        {shown !== t.amountCents && <span className="block text-[11.5px] text-faint">of {money(t.amountCents, { sign: true })}</span>}
+      </span>
     </li>
   );
 }
@@ -260,6 +295,7 @@ function CategorySelect({ value, categories, label, onChange }: { value: string 
         </option>
       ))}
       <option value={NEW_CATEGORY}>New category…</option>
+      <option value={SPLIT}>Split…</option>
     </select>
   );
 }

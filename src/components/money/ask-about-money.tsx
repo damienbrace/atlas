@@ -7,6 +7,7 @@ import { Sparkle } from "@/components/sparkle";
 import { useToast } from "@/components/toast";
 import { merchantName } from "@/lib/money/merchant";
 import { answer, spanLabel, upIsGood, type Answer, type MoneyQuery, type QueryKind, type Span } from "@/lib/money/question";
+import { paymentId } from "@/lib/money/split";
 import { money, type Transaction } from "@/lib/money/types";
 
 // "How much on takeaway since July?" Claude only reads the question and picks the
@@ -143,9 +144,11 @@ function Largest({ a }: { a: Answer }) {
 
 /** The dates to show an answer's transactions over; null when it covers everything. */
 const shownSpan = (q: MoneyQuery, a: Answer) => (q.range.from || q.range.to ? a.span : null);
+/** The payments behind an answer, for the list (which shows a split payment once). */
+const paymentIds = (a: Answer) => [...new Set(a.matches.map(paymentId))];
 
 interface AskAboutMoneyProps {
-  /** Every transaction, whatever period or account the page is showing. */
+  /** Every transaction, whatever period or account the page is showing, with split payments as their parts. */
   transactions: Transaction[];
   today: string;
   /** The list is showing an answer's transactions, so it should follow the next answer too. */
@@ -180,7 +183,7 @@ export function AskAboutMoney({ transactions, today, following, onShow, onClear 
     if (following) {
       if (!res.query) return onClear();
       const next = answer(res.query, transactions, today);
-      onShow(res.query.title, next.matches.map((t) => t.id), shownSpan(res.query, next), false);
+      onShow(res.query.title, paymentIds(next), shownSpan(res.query, next), false);
     }
   }
 
@@ -196,7 +199,7 @@ export function AskAboutMoney({ transactions, today, following, onShow, onClear 
   }
 
   const q = asked?.query ?? null;
-  const n = result?.matches.length ?? 0;
+  const n = result?.count ?? 0;
 
   return (
     <section
@@ -297,7 +300,7 @@ export function AskAboutMoney({ transactions, today, following, onShow, onClear 
               <button
                 type="button"
                 disabled={n === 0}
-                onClick={() => onShow(q.title, result.matches.map((t) => t.id), shownSpan(q, result), true)}
+                onClick={() => onShow(q.title, paymentIds(result), shownSpan(q, result), true)}
                 className="mt-3 h-10 rounded-xl border border-line-strong px-3.5 text-[14.5px] hover:border-faint disabled:opacity-40"
               >
                 {n === 1 ? "Show this transaction" : n > 1 ? `Show these ${plural(n, "transaction")}` : "Show transactions"}

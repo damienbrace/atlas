@@ -151,11 +151,14 @@ create table if not exists money_transactions (
   description text not null,          -- as the bank wrote it
   merchant_key text not null,         -- description without numbers or noise, for sorting
   category text,                      -- null until sorted
-  sorted_by text,                     -- 'atlas', 'rule' or 'me'
+  sorted_by text,                     -- 'atlas', 'rule', 'me' or 'bank'
   balance_cents bigint,
   import_id text not null,
   created_at bigint not null
 );
+-- A payment split across categories: [{ "category": "Groceries", "cents": -59160 }, …],
+-- adding up to amount_cents. category then holds the biggest part, and sorted_by is 'me'.
+alter table money_transactions add column if not exists splits jsonb;
 create index if not exists money_transactions_day on money_transactions (day);
 create index if not exists money_transactions_key on money_transactions (merchant_key);
 

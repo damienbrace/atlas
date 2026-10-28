@@ -14,7 +14,20 @@ export interface Transaction {
   merchant: string | null;
   category: string | null;
   sortedBy: SortedBy | null;
+  /** Set when I've split it across categories; the parts add up to amountCents. */
+  splits?: SplitPart[] | null;
+  /** On one part of a split payment (see expandSplits): the payment it came from. */
+  splitOf?: string;
 }
+
+export interface SplitPart {
+  category: string;
+  /** Signed like the payment. */
+  cents: number;
+}
+
+/** Parts one payment can be split into. */
+export const MAX_SPLITS = 5;
 
 /** Who put a transaction in its category. "bank" is the export itself marking a move between my own accounts. */
 export type SortedBy = "atlas" | "rule" | "me" | "bank";

@@ -17,13 +17,15 @@ import {
   resort,
   saveMerchants,
   setCategory,
+  setSplits,
   startUpload,
+  transactionAmounts,
   transactionSpan,
   unsortedMerchants,
 } from "@/lib/money/db";
 import { cleanDescription, normalise, titleCase } from "@/lib/money/merchant";
 import type { MoneyQuery } from "@/lib/money/question";
-import { INCOME, MAX_CATEGORY, TRANSFERS, UPLOAD_CHUNK, type ProposedRule } from "@/lib/money/types";
+import { INCOME, MAX_CATEGORY, MAX_SPLITS, TRANSFERS, UPLOAD_CHUNK, type ProposedRule, type SplitPart } from "@/lib/money/types";
 
 // Server Functions are public endpoints: check the session and validate every input.
 
@@ -126,6 +128,32 @@ export async function categorise(ids: string[], category: string | null) {
   if (!Array.isArray(ids) || ids.length === 0 || ids.length > 5000 || !ids.every(isTransactionId)) return { ok: false as const };
   if (category !== null && (typeof category !== "string" || !(await isCategory(category)))) return { ok: false as const };
   await setCategory(ids, category);
+  return { ok: true as const };
+}
+
+/**
+ * Splits payments across categories. Each payment's parts must be real categories, run the
+ * same way as the payment, and add up to it exactly.
+ */
+export async function splitTransactions(items: { id: string; parts: SplitPart[] }[]) {
+  if (!(await signedIn())) return { ok: false as const };
+  if (!Array.isArray(items) || items.length === 0 || items.length > 500 || !items.every((i) => isTransactionId(i?.id))) return { ok: false as const };
+  const [categories, amounts] = await Promise.all([getCategories(), transactionAmounts(items.map((i) => i.id))]);
+  const amountOf = new Map(amounts.map((a) => [a.id, a.amount_cents]));
+  const clean = [];
+  for (const { id, parts } of items) {
+    const amount = amountOf.get(id);
+    if (amount === undefined || amount === 0 || !Array.isArray(parts) || parts.length < 2 || parts.length > MAX_SPLITS) return { ok: false as const };
+    const splits: SplitPart[] = [];
+    for (const p of parts) {
+      if (!categories.includes(p?.category) || !Number.isSafeInteger(p?.cents) || p.cents === 0 || Math.sign(p.cents) !== Math.sign(amount)) return { ok: false as const };
+      splits.push({ category: p.category, cents: p.cents });
+    }
+    if (splits.reduce((sum, p) => sum + p.cents, 0) !== amount) return { ok: false as const };
+    const biggest = splits.reduce((a, b) => (Math.abs(b.cents) > Math.abs(a.cents) ? b : a));
+    clean.push({ id, category: biggest.category, splits });
+  }
+  await setSplits(clean);
   return { ok: true as const };
 }
 

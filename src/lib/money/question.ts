@@ -2,11 +2,13 @@ import { MONTHS } from "@/lib/format";
 import { addDays, parseDay } from "@/lib/life/days";
 import { merchantName } from "./merchant";
 import { inRange, kindOf, monthLabel, monthStart, weekLabel, weekStart, type Range } from "./periods";
+import { paymentId } from "./split";
 import { TRANSFERS, type Transaction } from "./types";
 
 // Answering a question about money. Claude turns the question into a MoneyQuery and
 // never sees an amount; the numbers are worked out here from the transactions, so
-// they're exact. Safe in the browser and on the server.
+// they're exact. Split payments come in as their parts (expandSplits), each in its own
+// category, and still count as one payment. Safe in the browser and on the server.
 
 export const QUERY_KINDS = ["spending", "income", "net", "transfers-out", "transfers-in"] as const;
 export const QUERY_MEASURES = ["total", "count", "average", "per-week", "per-month", "largest"] as const;
@@ -54,6 +56,8 @@ export interface Group {
 export interface Answer {
   /** What fits the query in its span, newest first. */
   matches: Transaction[];
+  /** How many payments those are (the parts of a split payment count once). */
+  count: number;
   span: Span;
   totalCents: number;
   /** The headline: cents, or a number of transactions for "count". */
@@ -93,6 +97,7 @@ function fitsKind(t: Transaction, kind: QueryKind) {
 
 /** What a transaction adds: spending counts up (a refund counts down), income and net keep their sign. */
 const valueOf = (t: Transaction, kind: QueryKind) => (kind === "spending" || kind === "transfers-out" ? -t.amountCents : t.amountCents);
+const payments = (transactions: Transaction[]) => new Set(transactions.map(paymentId)).size;
 
 export function queryFilter(q: MoneyQuery) {
   const categories = new Set(q.categories);
@@ -129,11 +134,12 @@ const weeksIn = (span: Span) => daysIn(span) / 7;
 
 function measure(q: MoneyQuery, matches: Transaction[], span: Span) {
   const total = matches.reduce((sum, t) => sum + valueOf(t, q.kind), 0);
+  const count = payments(matches);
   switch (q.measure) {
     case "count":
-      return matches.length;
+      return count;
     case "average":
-      return matches.length ? Math.round(total / matches.length) : 0;
+      return count ? Math.round(total / count) : 0;
     case "per-week":
       return Math.round(total / Math.max(weeksIn(span), 1));
     case "per-month":
@@ -197,11 +203,12 @@ export function answer(q: MoneyQuery, transactions: Transaction[], today: string
   if (q.compare) {
     const other = resolve(q.compare, first, today);
     const earlier = transactions.filter((t) => inRange(t.day, other) && fits(t));
-    compare = { span: other, value: measure(q, earlier, other), count: earlier.length };
+    compare = { span: other, value: measure(q, earlier, other), count: payments(earlier) };
   }
 
   return {
     matches,
+    count: payments(matches),
     span,
     totalCents: matches.reduce((sum, t) => sum + valueOf(t, q.kind), 0),
     value: measure(q, matches, span),

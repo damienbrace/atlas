@@ -3,7 +3,7 @@
 import { FileUp } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition, type FormEvent } from "react";
-import { approveRules, categorise, createCategory, removeRule } from "@/app/(app)/money/actions";
+import { approveRules, categorise, createCategory, removeRule, splitTransactions } from "@/app/(app)/money/actions";
 import { Dialog } from "@/components/dialog";
 import { useToast } from "@/components/toast";
 import { addDays, shortDay } from "@/lib/life/days";
@@ -22,16 +22,22 @@ import {
 } from "@/lib/money/periods";
 import type { Span } from "@/lib/money/question";
 import { findRecurring } from "@/lib/money/recurring";
-import { isFixed, MAX_CATEGORY, type Rule, type Transaction, type Upload } from "@/lib/money/types";
+import { expandSplits, splitByShares } from "@/lib/money/split";
+import { isFixed, MAX_CATEGORY, type Rule, type SplitPart, type Transaction, type Upload } from "@/lib/money/types";
 import { AskAboutMoney } from "./ask-about-money";
 import { AskAtlas, ruleMatches } from "./ask-atlas";
 import { CategoryBars, SpendingChart, Totals, UNSORTED, type ChartUnit } from "./overview";
 import { Repeats } from "./repeats";
+import { SplitDialog } from "./split-dialog";
 import { NO_FILTERS, TransactionList, type ListFilters } from "./transactions";
 import { UploadDialog } from "./upload-dialog";
 
 // The Money page: personal spending from bank CSVs. Everything is loaded once and
-// filtered in the browser, so changing the period or a filter is instant.
+// filtered in the browser, so changing the period or a filter is instant. The list shows
+// each payment once; totals and charts count a split payment's parts in their own categories.
+
+/** What my own picks change on a transaction, shown before the server has it. */
+type Patch = Pick<Transaction, "category" | "sortedBy" | "splits">;
 
 interface MoneyProps {
   transactions: Transaction[];
@@ -66,8 +72,8 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
   const [, startRefresh] = useTransition();
   const refresh = () => startRefresh(() => router.refresh());
 
-  // My category picks show straight away; the server's copy replaces them on refresh.
-  const [picks, setPicks] = useState<Record<string, string | null>>({});
+  // My category picks and splits show straight away; the server's copy replaces them on refresh.
+  const [picks, setPicks] = useState<Record<string, Patch>>({});
   const [seen, setSeen] = useState(fromServer);
   if (seen !== fromServer) {
     setSeen(fromServer);
@@ -77,7 +83,7 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
     () =>
       Object.keys(picks).length === 0
         ? fromServer
-        : fromServer.map((t) => (t.id in picks ? { ...t, category: picks[t.id], sortedBy: picks[t.id] === null ? null : ("me" as const) } : t)),
+        : fromServer.map((t) => (t.id in picks ? { ...t, ...picks[t.id] } : t)),
     [fromServer, picks],
   );
   const [addedCategories, setAddedCategories] = useState<string[]>([]);
@@ -90,35 +96,42 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
   const [chartUnit, setChartUnit] = useState<ChartUnit>("month");
   const [uploading, setUploading] = useState(false);
   const [naming, setNaming] = useState<Transaction | null>(null);
+  const [splitting, setSplitting] = useState<Transaction | null>(null);
 
   const accounts = [...new Set([...uploads.map((u) => u.account), ...transactions.map((t) => t.account)])];
   const mine = useMemo(() => (account ? transactions.filter((t) => t.account === account) : transactions), [transactions, account]);
   const range = periodRange(period, today, custom);
   const inPeriod = mine.filter((t) => inRange(t.day, range));
-  const summary = summarise(inPeriod);
+  // Split payments as their parts, for everything that adds up by category.
+  const allParts = useMemo(() => expandSplits(transactions), [transactions]);
+  const parts = useMemo(() => expandSplits(mine), [mine]);
+  const summary = summarise(parts.filter((t) => inRange(t.day, range)));
   // Only compare with a span the transactions fully cover; one reaching back before the
   // first transaction would make any period look like a huge rise.
   const earliest = mine.at(-1)?.day ?? today;
   const before = previousRange(period, today, custom);
   const previous = before?.range.from && before.range.from >= earliest ? before : null;
-  const earlier = previous ? mine.filter((t) => inRange(t.day, previous.range)) : [];
+  const earlier = previous ? parts.filter((t) => inRange(t.day, previous.range)) : [];
   const recurring = useMemo(() => findRecurring(mine, today), [mine, today]);
 
   // The chart follows the category filter, and ends with the period's last month or week.
-  const chartSource = filters.category ? mine.filter((t) => (filters.category === UNSORTED ? t.category === null : t.category === filters.category)) : mine;
+  const chartSource = filters.category ? parts.filter((t) => (filters.category === UNSORTED ? t.category === null : t.category === filters.category)) : parts;
   const latest = mine[0]?.day ?? today;
   const chartEnd = range.to ? (range.to < today ? range.to : today) : latest;
   const chartTitle = `${filters.category ? (filters.category === UNSORTED ? "Unsorted" : filters.category) : "Spending"} each ${chartUnit}`;
 
+  const unpick = (ids: string[]) =>
+    setPicks((p) => {
+      const rest = { ...p };
+      for (const id of ids) delete rest[id];
+      return rest;
+    });
+
   async function pickCategory(t: Transaction, category: string | null) {
-    setPicks((p) => ({ ...p, [t.id]: category }));
+    setPicks((p) => ({ ...p, [t.id]: { category, sortedBy: category === null ? null : "me", splits: null } }));
     const res = await categorise([t.id], category).catch(() => ({ ok: false as const }));
     if (!res.ok) {
-      setPicks((p) => {
-        const rest = { ...p };
-        delete rest[t.id];
-        return rest;
-      });
+      unpick([t.id]);
       return toast({ message: "Couldn't change that category" });
     }
     if (category === null) return refresh();
@@ -128,6 +141,38 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
       message: `Moved to ${category}`,
       actionLabel: `All ${others.length + 1} from ${merchantName(t)}`,
       onAction: () => void saveRules([{ pattern: patternFor(t), category, amountCents: null }], []),
+    });
+  }
+
+  /** Saves splits; each payment's parts must add up to it. */
+  async function saveSplits(items: { t: Transaction; parts: SplitPart[] }[]) {
+    const biggest = (parts: SplitPart[]) => parts.reduce((a, b) => (Math.abs(b.cents) > Math.abs(a.cents) ? b : a)).category;
+    setPicks((p) => ({ ...p, ...Object.fromEntries(items.map(({ t, parts }) => [t.id, { category: biggest(parts), sortedBy: "me" as const, splits: parts }])) }));
+    const res = await splitTransactions(items.map(({ t, parts }) => ({ id: t.id, parts }))).catch(() => ({ ok: false as const }));
+    if (!res.ok) unpick(items.map(({ t }) => t.id));
+    return res.ok;
+  }
+
+  async function split(t: Transaction, parts: SplitPart[] | null) {
+    setSplitting(null);
+    if (parts === null) return pickCategory(t, null);
+    if (!(await saveSplits([{ t, parts }]))) return toast({ message: "Couldn't split that payment" });
+    // The same payment again ("Mum · Money owed" three times) can be split the same way.
+    const others = transactions.filter(
+      (o) => o.id !== t.id && o.merchantKey === t.merchantKey && o.sortedBy !== "bank" && Math.sign(o.amountCents) === Math.sign(t.amountCents),
+    );
+    if (others.length === 0) return toast({ message: "Split saved" });
+    const shares = parts.map((p) => ({ category: p.category, share: p.cents / t.amountCents }));
+    toast({
+      message: "Split saved",
+      actionLabel: `Split all ${others.length + 1} the same way`,
+      onAction: async () => {
+        // A payment too small to split into whole cents is left as it is.
+        const items = others.map((o) => ({ t: o, parts: splitByShares(o.amountCents, shares) })).filter((i) => i.parts.every((p) => p.cents !== 0));
+        if (items.length === 0) return;
+        if (await saveSplits(items)) toast({ message: `Split ${items.length + 1} payments` });
+        else toast({ message: "Couldn't split those payments" });
+      },
     });
   }
 
@@ -247,7 +292,7 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
         </header>
 
         <AskAboutMoney
-          transactions={transactions}
+          transactions={allParts}
           today={today}
           following={filters.atlas !== null}
           onShow={showAnswer}
@@ -323,6 +368,7 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
                 thisYear={today.slice(0, 4)}
                 onCategorise={(t, c) => void pickCategory(t, c)}
                 onNewCategory={setNaming}
+                onSplit={setSplitting}
               />
             </div>
           </div>
@@ -357,6 +403,8 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
       </div>
 
       {uploadDialog}
+
+      <SplitDialog transaction={splitting} categories={categories} onClose={() => setSplitting(null)} onSave={(t, p) => void split(t, p)} />
 
       <Dialog open={naming !== null} onClose={() => setNaming(null)} title="New category">
         <form onSubmit={(e) => void nameCategory(e)} className="flex flex-col gap-4">
