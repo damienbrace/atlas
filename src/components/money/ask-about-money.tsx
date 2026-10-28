@@ -138,15 +138,22 @@ function Largest({ a }: { a: Answer }) {
   );
 }
 
+/** The dates to show an answer's transactions over; null when it covers everything. */
+const shownSpan = (q: MoneyQuery, a: Answer) => (q.range.from || q.range.to ? a.span : null);
+
 interface AskAboutMoneyProps {
   /** Every transaction, whatever period or account the page is showing. */
   transactions: Transaction[];
   today: string;
-  /** Shows the answer's transactions in the list; `span` is null when it covers everything. */
-  onShow: (title: string, ids: string[], span: Span | null) => void;
+  /** The list is showing an answer's transactions, so it should follow the next answer too. */
+  following: boolean;
+  /** Shows the answer's transactions in the list; `scroll` takes the page down to it. */
+  onShow: (title: string, ids: string[], span: Span | null, scroll: boolean) => void;
+  /** Takes the answer's transactions off the list. */
+  onClear: () => void;
 }
 
-export function AskAboutMoney({ transactions, today, onShow }: AskAboutMoneyProps) {
+export function AskAboutMoney({ transactions, today, following, onShow, onClear }: AskAboutMoneyProps) {
   const toast = useToast();
   const [text, setText] = useState("");
   const [asking, setAsking] = useState(false);
@@ -166,6 +173,12 @@ export function AskAboutMoney({ transactions, today, onShow }: AskAboutMoneyProp
     setAsked({ question: q, query: res.query, reply: res.reply });
     if (res.query) setEarlier((e) => [...e, { question: q, title: res.query!.title }].slice(-EARLIER));
     setText("");
+    // Once the list is showing answers, it keeps up with each new one (staying put on the page).
+    if (following) {
+      if (!res.query) return onClear();
+      const next = answer(res.query, transactions, today);
+      onShow(res.query.title, next.matches.map((t) => t.id), shownSpan(res.query, next), false);
+    }
   }
 
   function submit(e: FormEvent) {
@@ -176,6 +189,7 @@ export function AskAboutMoney({ transactions, today, onShow }: AskAboutMoneyProp
   function close() {
     setAsked(null);
     setEarlier([]);
+    if (following) onClear();
   }
 
   const q = asked?.query ?? null;
@@ -278,7 +292,7 @@ export function AskAboutMoney({ transactions, today, onShow }: AskAboutMoneyProp
               <button
                 type="button"
                 disabled={n === 0}
-                onClick={() => onShow(q.title, result.matches.map((t) => t.id), q.range.from || q.range.to ? result.span : null)}
+                onClick={() => onShow(q.title, result.matches.map((t) => t.id), shownSpan(q, result), true)}
                 className="mt-3 h-10 rounded-xl border border-line-strong px-3.5 text-[14.5px] hover:border-faint disabled:opacity-40"
               >
                 {n === 1 ? "Show this transaction" : n > 1 ? `Show these ${plural(n, "transaction")}` : "Show transactions"}

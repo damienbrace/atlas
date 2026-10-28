@@ -163,13 +163,14 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
   }
 
   /** An answer can cover any dates and accounts, so the page switches to match it. */
-  function showAnswer(title: string, ids: string[], span: Span | null) {
+  function showAnswer(title: string, ids: string[], span: Span | null, scroll: boolean) {
     setAccount(null);
     if (span) {
       setCustom(span);
       setPeriod("custom");
     } else setPeriod("all");
-    showTransactions({ atlas: { title, ids } });
+    if (scroll) showTransactions({ atlas: { title, ids } });
+    else setFilters({ ...NO_FILTERS, atlas: { title, ids } });
   }
 
   const uploadDialog = (
@@ -240,7 +241,13 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
           </button>
         </header>
 
-        <AskAboutMoney transactions={transactions} today={today} onShow={showAnswer} />
+        <AskAboutMoney
+          transactions={transactions}
+          today={today}
+          following={filters.atlas !== null}
+          onShow={showAnswer}
+          onClear={() => setFilters((f) => ({ ...f, atlas: null }))}
+        />
 
         <div className="flex flex-wrap items-center gap-2 px-1">
           <div role="group" aria-label="Period" className="flex flex-wrap gap-1.5">
