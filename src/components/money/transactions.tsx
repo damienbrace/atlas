@@ -1,12 +1,12 @@
 "use client";
 
-import { Download, Split, X } from "lucide-react";
+import { Check, Download, Split, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Sparkle } from "@/components/sparkle";
 import { shortDay } from "@/lib/life/days";
 import { merchantName } from "@/lib/money/merchant";
 import { amountIn, describeSplit } from "@/lib/money/split";
-import { money, type Transaction } from "@/lib/money/types";
+import { money, TRANSFERS, type Transaction } from "@/lib/money/types";
 import { MerchantSearch } from "./merchant-search";
 import { UNSORTED } from "./overview";
 
@@ -23,9 +23,11 @@ export interface ListFilters {
   merchant: string | null;
   /** The transactions behind one of Atlas's answers. */
   atlas: { title: string; ids: string[] } | null;
+  /** Show moves between my own accounts (savers, round-ups, card repayments). */
+  transfers: boolean;
 }
 
-export const NO_FILTERS: ListFilters = { query: "", category: null, direction: "all", min: "", max: "", merchant: null, atlas: null };
+export const NO_FILTERS: ListFilters = { query: "", category: null, direction: "all", min: "", max: "", merchant: null, atlas: null, transfers: true };
 
 const dollars = (text: string) => {
   const n = parseFloat(text.replace(/[$,\s]/g, ""));
@@ -39,6 +41,7 @@ export function listFilter(f: ListFilters) {
   const atlas = f.atlas && new Set(f.atlas.ids);
   return (t: Transaction) => {
     if (atlas && !atlas.has(t.id)) return false;
+    if (!f.transfers && t.category === TRANSFERS) return false;
     if (f.merchant && merchantName(t) !== f.merchant) return false;
     if (q && ![t.merchant, t.description, t.category].some((field) => field?.toLowerCase().includes(q))) return false;
     if (f.category === UNSORTED ? t.category !== null : f.category !== null && t.category !== f.category && !t.splits?.some((p) => p.category === f.category))
@@ -51,7 +54,7 @@ export function listFilter(f: ListFilters) {
 }
 
 const DIRECTIONS: { id: ListFilters["direction"]; label: string }[] = [
-  { id: "all", label: "All" },
+  { id: "all", label: "In and out" },
   { id: "out", label: "Money out" },
   { id: "in", label: "Money in" },
 ];
@@ -155,19 +158,30 @@ export function TransactionList({ transactions, filters, onFilters, categories, 
               </option>
             ))}
           </select>
-          <div role="group" aria-label="Money in or out" className="flex h-9 shrink-0 rounded-lg border border-line-strong p-0.5">
+          <select aria-label="Money in or out" value={filters.direction} onChange={(e) => set({ direction: e.target.value as ListFilters["direction"] })} className={control}>
             {DIRECTIONS.map((d) => (
-              <button
-                key={d.id}
-                type="button"
-                aria-pressed={filters.direction === d.id}
-                onClick={() => set({ direction: d.id })}
-                className={`rounded-md px-2.5 text-[13.5px] whitespace-nowrap ${filters.direction === d.id ? "bg-white/[0.08] text-ink" : "text-muted hover:text-ink"}`}
-              >
+              <option key={d.id} value={d.id}>
                 {d.label}
-              </button>
+              </option>
             ))}
-          </div>
+          </select>
+          <button
+            type="button"
+            aria-pressed={filters.transfers}
+            onClick={() => set({ transfers: !filters.transfers })}
+            title={filters.transfers ? "Hide moves between your own accounts" : "Show moves between your own accounts"}
+            className={`flex h-9 shrink-0 items-center gap-2 rounded-lg border px-2.5 text-[14px] ${
+              filters.transfers ? "border-line-strong text-ink" : "border-dashed border-faint text-muted"
+            } hover:border-ink/40`}
+          >
+            <span
+              aria-hidden="true"
+              className={`grid size-4 place-items-center rounded-[4px] border ${filters.transfers ? "border-ink/60 bg-white/[0.12]" : "border-faint"}`}
+            >
+              {filters.transfers && <Check className="size-3" strokeWidth={3} />}
+            </span>
+            Transfers
+          </button>
           <span className="flex items-center gap-1.5 text-[13px] text-muted">
             <input inputMode="decimal" value={filters.min} onChange={(e) => set({ min: e.target.value })} placeholder="$ min" aria-label="Smallest amount" className={`${control} w-[4.75rem]`} />
             to
