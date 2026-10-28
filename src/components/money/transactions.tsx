@@ -50,6 +50,12 @@ export function listFilter(f: ListFilters) {
   };
 }
 
+const DIRECTIONS: { id: ListFilters["direction"]; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "out", label: "Money out" },
+  { id: "in", label: "Money in" },
+];
+
 type Sort = "newest" | "oldest" | "out" | "in";
 const SORTS: { id: Sort; label: string }[] = [
   { id: "newest", label: "Newest" },
@@ -149,11 +155,19 @@ export function TransactionList({ transactions, filters, onFilters, categories, 
               </option>
             ))}
           </select>
-          <select aria-label="Money in or out" value={filters.direction} onChange={(e) => set({ direction: e.target.value as ListFilters["direction"] })} className={control}>
-            <option value="all">In and out</option>
-            <option value="out">Money out</option>
-            <option value="in">Money in</option>
-          </select>
+          <div role="group" aria-label="Money in or out" className="flex h-9 shrink-0 rounded-lg border border-line-strong p-0.5">
+            {DIRECTIONS.map((d) => (
+              <button
+                key={d.id}
+                type="button"
+                aria-pressed={filters.direction === d.id}
+                onClick={() => set({ direction: d.id })}
+                className={`rounded-md px-2.5 text-[13.5px] whitespace-nowrap ${filters.direction === d.id ? "bg-white/[0.08] text-ink" : "text-muted hover:text-ink"}`}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
           <span className="flex items-center gap-1.5 text-[13px] text-muted">
             <input inputMode="decimal" value={filters.min} onChange={(e) => set({ min: e.target.value })} placeholder="$ min" aria-label="Smallest amount" className={`${control} w-[4.75rem]`} />
             to

@@ -69,6 +69,14 @@ body {
   background: color-mix(in oklab, var(--color-teal) 35%, transparent);
 }
 
+/* A select's open list takes its colours from the select, and on Windows a transparent
+   select gives a white list, so light text vanished. Give the list its own dark colours. */
+option,
+optgroup {
+  background-color: var(--color-raised);
+  color: var(--color-ink);
+}
+
 /* Thin, quiet scrollbars inside panes */
 .scroll-thin {
   scrollbar-width: thin;
