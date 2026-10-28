@@ -1,7 +1,7 @@
 import { MONTHS } from "@/lib/format";
-import { parseDay } from "@/lib/life/days";
+import { addDays, parseDay } from "@/lib/life/days";
 import { merchantName } from "./merchant";
-import { inRange, kindOf, monthLabel, monthStart, type Range } from "./periods";
+import { inRange, kindOf, monthLabel, monthStart, weekLabel, weekStart, type Range } from "./periods";
 import { TRANSFERS, type Transaction } from "./types";
 
 // Answering a question about money. Claude turns the question into a MoneyQuery and
@@ -9,8 +9,8 @@ import { TRANSFERS, type Transaction } from "./types";
 // they're exact. Safe in the browser and on the server.
 
 export const QUERY_KINDS = ["spending", "income", "net", "transfers-out", "transfers-in"] as const;
-export const QUERY_MEASURES = ["total", "count", "average", "per-month", "largest"] as const;
-export const QUERY_GROUPS = ["none", "category", "merchant", "month", "account"] as const;
+export const QUERY_MEASURES = ["total", "count", "average", "per-week", "per-month", "largest"] as const;
+export const QUERY_GROUPS = ["none", "category", "merchant", "week", "month", "account"] as const;
 
 export type QueryKind = (typeof QUERY_KINDS)[number];
 export type QueryMeasure = (typeof QUERY_MEASURES)[number];
@@ -58,7 +58,8 @@ export interface Answer {
   totalCents: number;
   /** The headline: cents, or a number of transactions for "count". */
   value: number;
-  /** How many months the span covers, for "per-month". */
+  /** How many weeks and months the span covers, for "per-week" and "per-month". */
+  weeks: number;
   months: number;
   groups: Group[];
   /** Groups that didn't make the list. */
@@ -70,8 +71,9 @@ export interface Answer {
   dataEnds: string | null;
 }
 
-/** Month buckets shown at most; older ones are left out. */
+/** Month and week buckets shown at most; older ones are left out. */
 const MAX_MONTHS = 24;
+const MAX_WEEKS = 26;
 const daysBetween = (a: string, b: string) => Math.round((parseDay(b).getTime() - parseDay(a).getTime()) / 86_400_000);
 
 function fitsKind(t: Transaction, kind: QueryKind) {
@@ -121,7 +123,9 @@ function resolve(range: Range, first: string, today: string): Span {
   return { from, to: to < from ? from : to };
 }
 
-const monthsIn = (span: Span) => (daysBetween(span.from, span.to) + 1) / (365.25 / 12);
+const daysIn = (span: Span) => daysBetween(span.from, span.to) + 1;
+const monthsIn = (span: Span) => daysIn(span) / (365.25 / 12);
+const weeksIn = (span: Span) => daysIn(span) / 7;
 
 function measure(q: MoneyQuery, matches: Transaction[], span: Span) {
   const total = matches.reduce((sum, t) => sum + valueOf(t, q.kind), 0);
@@ -130,6 +134,8 @@ function measure(q: MoneyQuery, matches: Transaction[], span: Span) {
       return matches.length;
     case "average":
       return matches.length ? Math.round(total / matches.length) : 0;
+    case "per-week":
+      return Math.round(total / Math.max(weeksIn(span), 1));
     case "per-month":
       return Math.round(total / Math.max(monthsIn(span), 1));
     default:
@@ -137,22 +143,39 @@ function measure(q: MoneyQuery, matches: Transaction[], span: Span) {
   }
 }
 
+function groupKey(t: Transaction, group: QueryGroup) {
+  switch (group) {
+    case "week":
+      return weekStart(t.day);
+    case "month":
+      return t.day.slice(0, 7);
+    case "category":
+      return t.category ?? "Not sorted yet";
+    case "merchant":
+      return merchantName(t);
+    default:
+      return t.account;
+  }
+}
+
 function groupsOf(q: MoneyQuery, matches: Transaction[], span: Span): Group[] {
   const groups = new Map<string, Group>();
-  // Every month in the span, so a month with nothing still shows.
+  // Every week or month in the span, so one with nothing still shows.
+  if (q.groupBy === "week") {
+    for (let w = weekStart(span.from); w <= span.to; w = addDays(w, 7)) groups.set(w, { label: weekLabel(w), cents: 0, count: 0 });
+  }
   if (q.groupBy === "month") {
     for (let m = monthStart(span.from); m <= span.to; m = monthStart(m, 1)) groups.set(m.slice(0, 7), { label: monthLabel(m), cents: 0, count: 0 });
   }
   for (const t of matches) {
-    const key =
-      q.groupBy === "month" ? t.day.slice(0, 7) : q.groupBy === "category" ? (t.category ?? "Not sorted yet") : q.groupBy === "merchant" ? merchantName(t) : t.account;
+    const key = groupKey(t, q.groupBy);
     const g = groups.get(key) ?? { label: key, cents: 0, count: 0 };
     g.cents += valueOf(t, q.kind);
     g.count += 1;
     groups.set(key, g);
   }
   const list = [...groups.values()];
-  if (q.groupBy === "month") return list;
+  if (q.groupBy === "week" || q.groupBy === "month") return list;
   return list.sort((a, b) => (q.measure === "count" ? b.count - a.count : b.cents - a.cents) || a.label.localeCompare(b.label));
 }
 
@@ -168,7 +191,7 @@ export function answer(q: MoneyQuery, transactions: Transaction[], today: string
   const matches = transactions.filter((t) => inRange(t.day, span) && fits(t)).sort((a, b) => b.day.localeCompare(a.day));
 
   const groups = q.groupBy === "none" ? [] : groupsOf(q, matches, span);
-  const shown = q.groupBy === "month" ? groups.slice(-MAX_MONTHS) : groups.slice(0, q.top);
+  const shown = q.groupBy === "week" ? groups.slice(-MAX_WEEKS) : q.groupBy === "month" ? groups.slice(-MAX_MONTHS) : groups.slice(0, q.top);
 
   let compare: Answer["compare"] = null;
   if (q.compare) {
@@ -182,6 +205,7 @@ export function answer(q: MoneyQuery, transactions: Transaction[], today: string
     span,
     totalCents: matches.reduce((sum, t) => sum + valueOf(t, q.kind), 0),
     value: measure(q, matches, span),
+    weeks: weeksIn(span),
     months: monthsIn(span),
     groups: shown,
     moreGroups: groups.length - shown.length,

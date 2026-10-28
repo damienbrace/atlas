@@ -4,10 +4,10 @@ import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { useState } from "react";
 import { MONTHS } from "@/lib/format";
 import { parseDay } from "@/lib/life/days";
-import { monthLabel, type Summary } from "@/lib/money/periods";
+import { monthLabel, weekLabel, type Bucket, type Summary } from "@/lib/money/periods";
 import { compactMoney, money } from "@/lib/money/types";
 
-// The top of the Money page: three totals, spending by category and spending by month.
+// The top of the Money page: three totals, spending by category and spending by month or week.
 // One measure per chart, so one colour and no legend; values are always in text too.
 
 export const UNSORTED = "__unsorted";
@@ -114,14 +114,18 @@ export function CategoryBars({ summary, selected, onSelect }: CategoryBarsProps)
   );
 }
 
-// ---- By month ----------------------------------------------------------------------------
+// ---- By month or week ------------------------------------------------------------------
 
-interface MonthlyProps {
-  months: { month: string; cents: number }[];
+export type ChartUnit = "month" | "week";
+
+interface SpendingChartProps {
+  bars: Bucket[];
+  unit: ChartUnit;
+  onUnit: (unit: ChartUnit) => void;
   today: string;
   title: string;
-  /** Picks a month as the period. */
-  onPick: (month: string) => void;
+  /** Picks a bar's month or week as the period. */
+  onPick: (bar: Bucket) => void;
 }
 
 const CHART_HEIGHT = 150;
@@ -134,22 +138,43 @@ function niceMax(cents: number) {
   return step * magnitude;
 }
 
-export function MonthlyChart({ months, today, title, onPick }: MonthlyProps) {
+export function SpendingChart({ bars, unit, onUnit, today, title, onPick }: SpendingChartProps) {
   const [hover, setHover] = useState<number | null>(null);
-  const top = niceMax(Math.max(...months.map((m) => m.cents)));
-  const current = today.slice(0, 7);
-  const shown = hover !== null ? months[hover] : null;
+  const top = niceMax(Math.max(...bars.map((b) => b.cents)));
+  const shown = hover !== null ? bars[hover] : null;
+  const name = (b: Bucket) => (unit === "month" ? monthLabel(b.from) : weekLabel(b.from));
+  const partial = (b: Bucket) => b.from <= today && today <= b.to;
+  // Months get their initial; weeks get the month's name under the first week that starts in it.
+  const tick = (b: Bucket, i: number) => {
+    const month = MONTHS[parseDay(b.from).getMonth()];
+    if (unit === "month") return month.charAt(0);
+    return i === 0 || b.from.slice(5, 7) !== bars[i - 1].from.slice(5, 7) ? month : "";
+  };
 
   return (
     <section aria-label={title} className={`${card} p-4 md:p-5`}>
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-[17px] font-bold tracking-tight">{title}</h2>
-        <p className="text-[13px] text-muted tabular-nums" aria-live="polite">
-          {shown
-            ? `${monthLabel(shown.month)}${shown.month.slice(0, 7) === current ? " so far" : ""}: ${money(shown.cents, { whole: true })}`
-            : "Tap a month to see it"}
-        </p>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="min-w-0 truncate text-[17px] font-bold tracking-tight">{title}</h2>
+        <div role="group" aria-label="Show spending by" className="flex shrink-0 rounded-lg border border-line-strong p-0.5">
+          {(["month", "week"] as const).map((u) => (
+            <button
+              key={u}
+              type="button"
+              aria-pressed={unit === u}
+              onClick={() => {
+                setHover(null);
+                onUnit(u);
+              }}
+              className={`h-7 rounded-md px-2.5 text-[12.5px] ${unit === u ? "bg-white/[0.08] text-ink" : "text-muted hover:text-ink"}`}
+            >
+              {u === "month" ? "Months" : "Weeks"}
+            </button>
+          ))}
+        </div>
       </div>
+      <p className="mt-1.5 text-[13px] text-muted tabular-nums" aria-live="polite">
+        {shown ? `${name(shown)}${partial(shown) ? " so far" : ""}: ${money(shown.cents, { whole: true })}` : `Tap a ${unit} to see it`}
+      </p>
 
       <div className="relative mt-4 grid grid-cols-[2.5rem_minmax(0,1fr)] gap-2">
         {/* Gridlines at 0, half and the top of the scale. */}
@@ -165,22 +190,22 @@ export function MonthlyChart({ months, today, title, onPick }: MonthlyProps) {
             <span key={f} aria-hidden="true" className="absolute inset-x-0 h-px bg-line" style={{ top: (1 - f) * CHART_HEIGHT }} />
           ))}
           <div className="absolute inset-0 flex items-end gap-[2px]" onMouseLeave={() => setHover(null)}>
-            {months.map((m, i) => {
-              const partial = m.month.slice(0, 7) === current;
+            {bars.map((b, i) => {
+              const now = partial(b);
               return (
                 <button
-                  key={m.month}
+                  key={b.from}
                   type="button"
                   onMouseEnter={() => setHover(i)}
                   onFocus={() => setHover(i)}
                   onBlur={() => setHover(null)}
-                  onClick={() => onPick(m.month)}
-                  aria-label={`${monthLabel(m.month)}${partial ? " so far" : ""}: ${money(m.cents, { whole: true })}. Show this month.`}
+                  onClick={() => onPick(b)}
+                  aria-label={`${name(b)}${now ? " so far" : ""}: ${money(b.cents, { whole: true })}. Show this ${unit}.`}
                   className="group flex h-full min-w-0 flex-1 items-end justify-center rounded-t-md outline-none hover:bg-white/[0.03] focus-visible:bg-white/[0.05]"
                 >
                   <span
-                    className={`block w-full max-w-6 rounded-t-[4px] ${partial ? "bg-blue/45" : "bg-blue"} ${hover !== null && hover !== i ? "opacity-50" : ""}`}
-                    style={{ height: `${Math.max((Math.max(m.cents, 0) / top) * 100, m.cents > 0 ? 1 : 0)}%` }}
+                    className={`block w-full max-w-6 rounded-t-[4px] ${now ? "bg-blue/45" : "bg-blue"} ${hover !== null && hover !== i ? "opacity-50" : ""}`}
+                    style={{ height: `${Math.max((Math.max(b.cents, 0) / top) * 100, b.cents > 0 ? 1 : 0)}%` }}
                   />
                 </button>
               );
@@ -189,9 +214,9 @@ export function MonthlyChart({ months, today, title, onPick }: MonthlyProps) {
         </div>
         <div />
         <div aria-hidden="true" className="flex gap-[2px]">
-          {months.map((m) => (
-            <span key={m.month} className="min-w-0 flex-1 truncate text-center text-[11px] text-faint">
-              {MONTHS[parseDay(m.month).getMonth()].charAt(0)}
+          {bars.map((b, i) => (
+            <span key={b.from} className="min-w-0 flex-1 overflow-visible text-center text-[11px] whitespace-nowrap text-faint">
+              {tick(b, i)}
             </span>
           ))}
         </div>

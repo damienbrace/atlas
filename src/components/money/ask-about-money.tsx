@@ -38,7 +38,9 @@ const plural = (n: number, word: string) => `${n.toLocaleString("en-AU")} ${word
 function format(q: MoneyQuery, value: number) {
   if (q.measure === "count") return plural(value, "transaction");
   const amount = money(value, { sign: q.kind === "net" });
-  return q.measure === "average" ? `${amount} each` : q.measure === "per-month" ? `${amount} a month` : amount;
+  if (q.measure === "average") return `${amount} each`;
+  if (q.measure === "per-week") return `${amount} a week`;
+  return q.measure === "per-month" ? `${amount} a month` : amount;
 }
 
 /** What Atlas counted, in plain words: "Spending · Eating out · over $20.00". */
@@ -55,7 +57,8 @@ function counted(q: MoneyQuery) {
 }
 
 function Headline({ q, a }: { q: MoneyQuery; a: Answer }) {
-  const unit = q.measure === "count" ? (a.value === 1 ? "transaction" : "transactions") : q.measure === "average" ? "per transaction" : q.measure === "per-month" ? "a month" : null;
+  const units: Partial<Record<MoneyQuery["measure"], string>> = { average: "per transaction", "per-week": "a week", "per-month": "a month" };
+  const unit = q.measure === "count" ? (a.value === 1 ? "transaction" : "transactions") : (units[q.measure] ?? null);
   return (
     <p className="mt-2 flex flex-wrap items-baseline gap-x-2">
       <span className={`text-[30px] leading-tight font-semibold tracking-tight tabular-nums ${q.kind === "net" && a.value < 0 ? "text-red" : ""}`}>
@@ -272,7 +275,9 @@ export function AskAboutMoney({ transactions, today, following, onShow, onClear 
                   <p className="mt-0.5 text-[13.5px] text-muted">
                     {[
                       q.measure !== "count" && (n ? plural(n, "transaction") : "No transactions match"),
-                      q.measure === "per-month" && n > 0 && `${money(result.totalCents, { sign: q.kind === "net" })} over ${result.months.toFixed(1).replace(/\.0$/, "")} months`,
+                      (q.measure === "per-week" || q.measure === "per-month") &&
+                        n > 0 &&
+                        `${money(result.totalCents, { sign: q.kind === "net" })} over ${(q.measure === "per-week" ? result.weeks : result.months).toFixed(1).replace(/\.0$/, "")} ${q.measure === "per-week" ? "weeks" : "months"}`,
                       spanLabel(result.span),
                     ]
                       .filter(Boolean)

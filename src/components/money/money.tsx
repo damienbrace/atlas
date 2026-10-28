@@ -10,13 +10,13 @@ import { addDays, shortDay } from "@/lib/life/days";
 import { merchantName, normalise, patternMatches } from "@/lib/money/merchant";
 import {
   inRange,
-  monthEnd,
   monthlySpending,
   monthStart,
   PERIODS,
   periodRange,
   previousRange,
   summarise,
+  weeklySpending,
   type PeriodId,
   type Range,
 } from "@/lib/money/periods";
@@ -25,7 +25,7 @@ import { findRecurring } from "@/lib/money/recurring";
 import { isFixed, MAX_CATEGORY, type Rule, type Transaction, type Upload } from "@/lib/money/types";
 import { AskAboutMoney } from "./ask-about-money";
 import { AskAtlas, ruleMatches } from "./ask-atlas";
-import { CategoryBars, MonthlyChart, Totals, UNSORTED } from "./overview";
+import { CategoryBars, SpendingChart, Totals, UNSORTED, type ChartUnit } from "./overview";
 import { Repeats } from "./repeats";
 import { NO_FILTERS, TransactionList, type ListFilters } from "./transactions";
 import { UploadDialog } from "./upload-dialog";
@@ -87,6 +87,7 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
   const [custom, setCustom] = useState<Range>({ from: monthStart(today), to: today });
   const [account, setAccount] = useState<string | null>(null);
   const [filters, setFilters] = useState<ListFilters>(NO_FILTERS);
+  const [chartUnit, setChartUnit] = useState<ChartUnit>("month");
   const [uploading, setUploading] = useState(false);
   const [naming, setNaming] = useState<Transaction | null>(null);
 
@@ -95,15 +96,19 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
   const range = periodRange(period, today, custom);
   const inPeriod = mine.filter((t) => inRange(t.day, range));
   const summary = summarise(inPeriod);
-  const previous = previousRange(period, today, custom);
+  // Only compare with a span the transactions fully cover; one reaching back before the
+  // first transaction would make any period look like a huge rise.
+  const earliest = mine.at(-1)?.day ?? today;
+  const before = previousRange(period, today, custom);
+  const previous = before?.range.from && before.range.from >= earliest ? before : null;
   const earlier = previous ? mine.filter((t) => inRange(t.day, previous.range)) : [];
   const recurring = useMemo(() => findRecurring(mine, today), [mine, today]);
 
-  // The monthly chart follows the category filter, and ends with the period's last month.
+  // The chart follows the category filter, and ends with the period's last month or week.
   const chartSource = filters.category ? mine.filter((t) => (filters.category === UNSORTED ? t.category === null : t.category === filters.category)) : mine;
   const latest = mine[0]?.day ?? today;
   const chartEnd = range.to ? (range.to < today ? range.to : today) : latest;
-  const chartTitle = filters.category ? `${filters.category === UNSORTED ? "Unsorted" : filters.category} each month` : "Spending each month";
+  const chartTitle = `${filters.category ? (filters.category === UNSORTED ? "Unsorted" : filters.category) : "Spending"} each ${chartUnit}`;
 
   async function pickCategory(t: Transaction, category: string | null) {
     setPicks((p) => ({ ...p, [t.id]: category }));
@@ -326,12 +331,14 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
               <CategoryBars summary={summary} selected={filters.category} onSelect={(category) => setFilters((f) => ({ ...f, category }))} />
             </div>
             <div className="order-3">
-              <MonthlyChart
-                months={monthlySpending(chartSource, chartEnd)}
+              <SpendingChart
+                bars={chartUnit === "month" ? monthlySpending(chartSource, chartEnd) : weeklySpending(chartSource, chartEnd)}
+                unit={chartUnit}
+                onUnit={setChartUnit}
                 today={today}
                 title={chartTitle}
-                onPick={(month) => {
-                  setCustom({ from: monthStart(month), to: monthEnd(month) });
+                onPick={(bar) => {
+                  setCustom({ from: bar.from, to: bar.to });
                   setPeriod("custom");
                 }}
               />

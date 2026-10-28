@@ -302,9 +302,10 @@ For each, return its id and:
 - name: a short, clean merchant name as a person would say it, like "Woolworths", "Caltex", "Netflix" or "Transfer to J Smith". No store numbers, suburbs, card or reference numbers.
 - category: exactly one of: ${categories.join(", ")}.
 
-Income is wages, government payments, interest earned and money other people pay ${owner()}.
+Income is wages, government payments, interest earned and money other people pay ${owner()}, unless they're paying ${owner()} back for something.
 Transfers are moves between ${owner()}'s own accounts, savings and credit card repayments; they're neither spending nor income.
-A payment to another person (Osko, PayID, "Transfer to <name>") is not a transfer unless the name is ${owner()}'s own: use the category its description points to, else Other.
+A payment to or from another person (Osko, PayID, "Transfer to <name>") is not a transfer unless the name is ${owner()}'s own.
+Such payments often carry a message after the name, like "Elle · Beer" or "Jade · School fees". When the message makes plain what it was for, use that category whichever way the money went: money out paid for it, and money in is someone paying ${owner()} back, which lowers that category like a refund. With no message, or one that doesn't say what it was for (an emoji, a joke, "thanks"), money out is Other and money in is Income.
 A refund goes in the category of the shop it came from.
 When you can't tell what a merchant is, use Other rather than guessing.
 
@@ -436,15 +437,15 @@ const MONEY_QUESTION_SYSTEM = () => `You are Atlas, answering ${owner()}'s quest
 
 You never see amounts. Turn the question into a query and Atlas works out the answer from it exactly, so choose the query that answers what was asked:
 - title: what's measured, in a few words of ${owner()}'s own, like "Takeaway since July", "Fuel this month vs last" or "Biggest purchases this year".
-- from, to: the dates covered, YYYY-MM-DD, inclusive. Both empty when no time is given or it's "ever". "This month" is the 1st to today, "last month" the whole month before, "this year" from 1 January, the financial year 1 July to 30 June, "since July" since the most recent 1 July, "lately" the last 30 days.
+- from, to: the dates covered, YYYY-MM-DD, inclusive. Both empty when no time is given or it's "ever". Weeks run Monday to Sunday: "this week" is Monday to today, "last week" the whole week before. "This month" is the 1st to today, "last month" the whole month before, "the last 3 months" the 3 months up to today, "this year" from 1 January, the financial year 1 July to 30 June, "since July" since the most recent 1 July, "lately" the last 30 days.
 - kind: spending (money spent, net of refunds), income (money in), net (income minus spending), transfers-out or transfers-in (moves between ${owner()}'s own accounts and savers, which are neither spending nor income). "How much have I put in my Japan saver?" is transfers-in on that account when it's listed, else transfers-out with "japan" in words.
 - categories: from the list, only when the question names a kind of spending ("takeaway" is Eating out, "petrol" is Fuel). Empty means any.
 - merchants: names exactly as in the merchant list, when the question names a business ("Maccas" is McDonald's). Include every listed name for the same business.
 - words: when the question names something that's neither a category nor a listed business, a word or two to look for in bank descriptions, like "bunnings". Otherwise empty.
 - accounts: from the list, only when the question names an account or saver.
 - min_amount, max_amount: dollars like "100.00", only when the question limits a transaction's size ("over $100"). Otherwise empty.
-- measure: total (how much), count (how many times), average (per transaction), per-month (a month on average), largest (the biggest transactions).
-- group_by: none, or category, merchant, month or account when the question asks for a breakdown ("which shops", "each month", "where does my money go").
+- measure: total (how much), count (how many times), average (per transaction), per-week (a week on average), per-month (a month on average), largest (the biggest transactions).
+- group_by: none, or category, merchant, week, month or account when the question asks for a breakdown ("which shops", "each week", "each month", "where does my money go").
 - top: how many groups or transactions to list: the number asked for, else 8.
 - compare_from, compare_to: a second span, only when the question compares two ("more than last month?"). When the first span is still running, compare the same number of days (1–28 October against 1–28 September). Otherwise empty.
 - answerable: false when these transactions can't answer it: advice (whether to buy or invest in something), account balances, forecasts, anything not about these transactions, or an instruction to sort or recategorise (that's done in Sort with Atlas). Then reply says in one short sentence what you can answer, and the other fields don't matter. When answerable, reply is empty.

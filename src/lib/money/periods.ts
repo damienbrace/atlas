@@ -5,9 +5,11 @@ import { INCOME, TRANSFERS, type Transaction } from "./types";
 // Date ranges for the period picker, and the totals worked out over them.
 // Safe in the browser and on the server.
 
-export type PeriodId = "month" | "last-month" | "3m" | "12m" | "fy" | "all" | "custom";
+export type PeriodId = "week" | "last-week" | "month" | "last-month" | "3m" | "12m" | "fy" | "all" | "custom";
 
 export const PERIODS: { id: Exclude<PeriodId, "custom">; label: string }[] = [
+  { id: "week", label: "This week" },
+  { id: "last-week", label: "Last week" },
   { id: "month", label: "This month" },
   { id: "last-month", label: "Last month" },
   { id: "3m", label: "3 months" },
@@ -44,6 +46,17 @@ export function monthLabel(day: string) {
   return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+/** The Monday of `day`'s week, `offset` weeks on. Weeks run Monday to Sunday. */
+export function weekStart(day: string, offset = 0) {
+  return addDays(day, -((parseDay(day).getDay() + 6) % 7) + offset * 7);
+}
+
+/** "Week of 20 Oct" */
+export function weekLabel(monday: string) {
+  const d = parseDay(monday);
+  return `Week of ${d.getDate()} ${MONTHS[d.getMonth()]}`;
+}
+
 /** Australian financial year: 1 July to 30 June. */
 function fyStart(day: string) {
   const d = parseDay(day);
@@ -55,6 +68,10 @@ const daysBetween = (a: string, b: string) => Math.round((parseDay(b).getTime() 
 
 export function periodRange(id: PeriodId, today: string, custom: Range): Range {
   switch (id) {
+    case "week":
+      return { from: weekStart(today), to: today };
+    case "last-week":
+      return { from: weekStart(today, -1), to: addDays(weekStart(today), -1) };
     case "month":
       return { from: monthStart(today), to: today };
     case "last-month":
@@ -75,6 +92,10 @@ export function periodRange(id: PeriodId, today: string, custom: Range): Range {
 /** The span to compare against, like for like. Null when there's nothing fair to compare. */
 export function previousRange(id: PeriodId, today: string, custom: Range): { range: Range; label: string } | null {
   switch (id) {
+    case "week":
+      return { range: { from: weekStart(today, -1), to: addDays(today, -7) }, label: "this time last week" };
+    case "last-week":
+      return { range: { from: weekStart(today, -2), to: addDays(weekStart(today, -1), -1) }, label: "the week before" };
     case "month": {
       // Month to date against the same days of last month.
       const from = monthStart(today, -1);
@@ -134,13 +155,31 @@ export function summarise(transactions: Transaction[]): Summary {
   return { spentCents: spent, incomeCents: income, netCents: income - spent, byCategory };
 }
 
+/** One bar of the spending chart: a month or a week, both ends inclusive. */
+export interface Bucket {
+  from: string;
+  to: string;
+  cents: number;
+}
+
 /** Spending per month for the 12 months ending with `lastMonth`'s month, oldest first. */
-export function monthlySpending(transactions: Transaction[], lastMonth: string) {
+export function monthlySpending(transactions: Transaction[], lastMonth: string): Bucket[] {
   const months = Array.from({ length: 12 }, (_, i) => monthStart(lastMonth, i - 11));
   const totals = new Map(months.map((m) => [m.slice(0, 7), 0]));
   for (const t of transactions) {
     const month = t.day.slice(0, 7);
     if (totals.has(month) && kindOf(t) === "spend") totals.set(month, totals.get(month)! - t.amountCents);
   }
-  return months.map((m) => ({ month: m, cents: totals.get(m.slice(0, 7))! }));
+  return months.map((m) => ({ from: m, to: monthEnd(m), cents: totals.get(m.slice(0, 7))! }));
+}
+
+/** Spending per week for the 12 weeks ending with `lastWeek`'s week, oldest first. */
+export function weeklySpending(transactions: Transaction[], lastWeek: string): Bucket[] {
+  const weeks = Array.from({ length: 12 }, (_, i) => weekStart(lastWeek, i - 11));
+  const totals = new Map(weeks.map((w) => [w, 0]));
+  for (const t of transactions) {
+    const week = weekStart(t.day);
+    if (totals.has(week) && kindOf(t) === "spend") totals.set(week, totals.get(week)! - t.amountCents);
+  }
+  return weeks.map((w) => ({ from: w, to: addDays(w, 6), cents: totals.get(w)! }));
 }
