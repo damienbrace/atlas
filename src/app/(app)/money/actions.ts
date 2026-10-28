@@ -1,8 +1,8 @@
 "use server";
 
-import { describeAiError, interpretMoneyInstruction, sortMerchants } from "@/lib/ai/claude";
+import { describeAiError, interpretMoneyInstruction, interpretMoneyQuestion, sortMerchants, type MoneyQuestionResult } from "@/lib/ai/claude";
 import { signedIn } from "@/lib/auth/session";
-import { isDayKey } from "@/lib/life/days";
+import { dayKey, isDayKey } from "@/lib/life/days";
 import type { CsvRow } from "@/lib/money/csv";
 import {
   addCategories,
@@ -18,10 +18,12 @@ import {
   saveMerchants,
   setCategory,
   startUpload,
+  transactionSpan,
   unsortedMerchants,
 } from "@/lib/money/db";
-import { cleanDescription, normalise } from "@/lib/money/merchant";
-import { MAX_CATEGORY, UPLOAD_CHUNK, type ProposedRule } from "@/lib/money/types";
+import { cleanDescription, normalise, titleCase } from "@/lib/money/merchant";
+import type { MoneyQuery } from "@/lib/money/question";
+import { INCOME, MAX_CATEGORY, TRANSFERS, UPLOAD_CHUNK, type ProposedRule } from "@/lib/money/types";
 
 // Server Functions are public endpoints: check the session and validate every input.
 
@@ -32,11 +34,19 @@ const MAX_ROWS = 50_000;
 const MAX_AMOUNT = 100_000_000_00;
 /** Merchants per Claude request when sorting. */
 const SORT_BATCH = 80;
-/** Merchants shown to Claude when it turns an instruction into rules. */
+/** Merchants shown to Claude when it turns an instruction into rules, or a question into a query. */
 const RULE_CONTEXT = 600;
+/** Earlier questions sent along, so follow-ups make sense. */
+const EARLIER_QUESTIONS = 3;
 
 const cleanText = (value: unknown, max: number) =>
   typeof value === "string" && value.trim() && value.length <= max ? value.replace(/\s+/g, " ").trim() : null;
+
+/** "50.00" or "$1,200" → cents; anything else → null. */
+function toCents(text: string) {
+  const dollars = text.replace(/[$,\s]/g, "");
+  return /^\d+(\.\d{1,2})?$/.test(dollars) ? Math.round(parseFloat(dollars) * 100) : null;
+}
 
 function cleanRow(input: unknown): CsvRow | null {
   if (!input || typeof input !== "object") return null;
@@ -146,9 +156,7 @@ export async function askAtlasToSort(
     const rules = result.rules.flatMap((r) => {
       const pattern = normalise(r.words);
       const category = allowed.get(r.category.trim().toLowerCase());
-      const dollars = r.amount.replace(/[$,\s]/g, "");
-      const amountCents = /^\d+(\.\d{1,2})?$/.test(dollars) ? Math.round(parseFloat(dollars) * 100) : null;
-      return pattern && category ? [{ pattern, category, amountCents }] : [];
+      return pattern && category ? [{ pattern, category, amountCents: toCents(r.amount) }] : [];
     });
     return { ok: true, reply: result.reply.trim(), rules: rules.slice(0, 30), newCategories };
   } catch (error) {
@@ -179,4 +187,105 @@ export async function removeRule(id: string) {
   if (!isId(id)) return { ok: false as const };
   await deleteRule(id);
   return { ok: true as const, rules: await listRules() };
+}
+
+// ---- Questions ------------------------------------------------------------------------
+
+/**
+ * Claude's query, checked against what's really there. A category, business or account
+ * it names that doesn't exist becomes a word to look for, so the answer never quietly
+ * widens to everything.
+ */
+function toQuery(r: MoneyQuestionResult, question: string, categories: string[], merchants: string[], accounts: string[]): MoneyQuery {
+  const words = new Set<string>();
+  const pick = (values: string[], known: string[]) => {
+    const byLower = new Map(known.map((k) => [k.toLowerCase(), k]));
+    const found = new Set<string>();
+    for (const value of values.slice(0, 20)) {
+      const clean = cleanText(value, 80);
+      if (!clean) continue;
+      const match = byLower.get(clean.toLowerCase());
+      if (match) found.add(match);
+      else words.add(clean.toLowerCase());
+    }
+    return [...found];
+  };
+  const picked = { categories: pick(r.categories, categories), merchants: pick(r.merchants, merchants), accounts: pick(r.accounts, accounts) };
+  for (const w of r.words.slice(0, 8)) {
+    const clean = cleanText(w, 40);
+    if (clean) words.add(clean.toLowerCase());
+  }
+
+  const span = (fromText: string, toText: string) => {
+    const from = isDayKey(fromText.trim()) ? fromText.trim() : null;
+    const to = isDayKey(toText.trim()) ? toText.trim() : null;
+    return from && to && from > to ? { from: to, to: from } : { from, to };
+  };
+  const compare = span(r.compare_from, r.compare_to);
+  let minCents = toCents(r.min_amount);
+  let maxCents = toCents(r.max_amount);
+  if (minCents !== null && maxCents !== null && minCents > maxCents) [minCents, maxCents] = [maxCents, minCents];
+
+  // Transfers and income aren't spending, so "spending on Transfers" would always be nothing.
+  const only = (category: string) => picked.categories.length > 0 && picked.categories.every((c) => c === category);
+  let kind = r.kind;
+  if (only(TRANSFERS) && kind !== "transfers-in" && kind !== "transfers-out") kind = "transfers-out";
+  if (only(INCOME) && kind === "spending") kind = "income";
+
+  return {
+    title: cleanText(r.title, 80) ?? question.slice(0, 80),
+    range: span(r.from, r.to),
+    kind,
+    ...picked,
+    words: [...words].slice(0, 8),
+    minCents,
+    maxCents,
+    measure: r.measure,
+    groupBy: r.group_by,
+    top: Number.isFinite(r.top) ? Math.min(Math.max(Math.round(r.top), 1), 20) : 8,
+    compare: compare.from && compare.to ? compare : null,
+  };
+}
+
+/** A question in, a query out. The page works out the answer from it, so the numbers are exact. */
+export async function askAboutMoney(
+  question: string,
+  earlier: { question: string; title: string }[] = [],
+): Promise<{ ok: true; reply: string; query: MoneyQuery | null } | { ok: false; error: string }> {
+  if (!(await signedIn())) return { ok: false, error: "Sign in again." };
+  const text = cleanText(question, 300);
+  if (!text) return { ok: false, error: "Ask something like “How much on takeaway since July?”" };
+  if (!Array.isArray(earlier)) return { ok: false, error: "Try asking again." };
+  const history = earlier.slice(-EARLIER_QUESTIONS).flatMap((e) => {
+    const asked = cleanText(e?.question, 300);
+    const title = cleanText(e?.title, 120);
+    return asked && title ? [{ question: asked, title }] : [];
+  });
+
+  const [categories, summary, span] = await Promise.all([getCategories(), merchantSummary(RULE_CONTEXT), transactionSpan()]);
+  // By the name the page shows, so a business Claude picks matches the list.
+  const merchants = new Map<string, { name: string; count: number; category: string | null }>();
+  for (const m of summary) {
+    const name = m.name ?? titleCase(m.key);
+    const known = merchants.get(name);
+    if (known) known.count += m.count;
+    else merchants.set(name, { name, count: m.count, category: m.category });
+  }
+
+  try {
+    const result = await interpretMoneyQuestion(text, history, {
+      today: dayKey(new Date()),
+      firstDay: span.first,
+      lastDay: span.last,
+      categories,
+      accounts: span.accounts,
+      merchants: [...merchants.values()].sort((a, b) => b.count - a.count),
+    });
+    if (!result.answerable) {
+      return { ok: true, reply: result.reply.trim() || "I can answer questions about what you've spent and what's come in.", query: null };
+    }
+    return { ok: true, reply: "", query: toQuery(result, text, categories, [...merchants.keys()], span.accounts) };
+  } catch (error) {
+    return { ok: false, error: describeAiError(error) };
+  }
 }

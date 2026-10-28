@@ -1,6 +1,6 @@
 "use client";
 
-import { Download } from "lucide-react";
+import { Download, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Sparkle } from "@/components/sparkle";
 import { shortDay } from "@/lib/life/days";
@@ -20,9 +20,11 @@ export interface ListFilters {
   max: string;
   /** One business, by its shown name (picked in the search, or from Repeat charges). */
   merchant: string | null;
+  /** The transactions behind one of Atlas's answers. */
+  atlas: { title: string; ids: string[] } | null;
 }
 
-export const NO_FILTERS: ListFilters = { query: "", category: null, direction: "all", min: "", max: "", merchant: null };
+export const NO_FILTERS: ListFilters = { query: "", category: null, direction: "all", min: "", max: "", merchant: null, atlas: null };
 
 const dollars = (text: string) => {
   const n = parseFloat(text.replace(/[$,\s]/g, ""));
@@ -33,7 +35,9 @@ export function listFilter(f: ListFilters) {
   const q = f.query.trim().toLowerCase();
   const min = dollars(f.min);
   const max = dollars(f.max);
+  const atlas = f.atlas && new Set(f.atlas.ids);
   return (t: Transaction) => {
+    if (atlas && !atlas.has(t.id)) return false;
     if (f.merchant && merchantName(t) !== f.merchant) return false;
     if (q && ![t.merchant, t.description, t.category].some((field) => field?.toLowerCase().includes(q))) return false;
     if (f.category === UNSORTED ? t.category !== null : f.category !== null && t.category !== f.category) return false;
@@ -108,6 +112,20 @@ export function TransactionList({ transactions, filters, onFilters, categories, 
             {rows.length.toLocaleString("en-AU")} · <span className={total > 0 ? "text-green" : "text-ink"}>{money(total, { sign: true })}</span>
           </p>
         </div>
+
+        {filters.atlas && (
+          <button
+            type="button"
+            onClick={() => set({ atlas: null })}
+            title="Show every transaction"
+            className="flex w-fit max-w-full items-center gap-1.5 rounded-lg border border-teal/50 bg-teal/10 py-1 pr-2 pl-2.5 text-[13.5px] text-ink hover:bg-teal/15"
+          >
+            <Sparkle className="size-3.5" />
+            <span className="truncate">{filters.atlas.title}</span>
+            <X className="size-3.5 shrink-0 text-muted" />
+            <span className="sr-only">, show every transaction</span>
+          </button>
+        )}
 
         <div className="flex flex-wrap items-center gap-2">
           <MerchantSearch

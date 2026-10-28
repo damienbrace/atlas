@@ -194,6 +194,13 @@ export async function merchantSummary(limit: number) {
     GROUP BY t.merchant_key ORDER BY count(*) DESC, t.merchant_key LIMIT ${limit}`;
 }
 
+/** The first and last day with transactions, and every account. */
+export async function transactionSpan() {
+  const [row] = await sql<{ first: string | null; last: string | null; accounts: string[] | null }[]>`
+    SELECT min(day) AS first, max(day) AS last, array_agg(DISTINCT account ORDER BY account) AS accounts FROM money_transactions`;
+  return { first: row?.first ?? null, last: row?.last ?? null, accounts: row?.accounts ?? [] };
+}
+
 /** My own pick for these transactions; null hands them back to rules and Atlas. */
 export async function setCategory(ids: string[], category: string | null) {
   if (category === null) {

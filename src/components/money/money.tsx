@@ -20,8 +20,10 @@ import {
   type PeriodId,
   type Range,
 } from "@/lib/money/periods";
+import type { Span } from "@/lib/money/question";
 import { findRecurring } from "@/lib/money/recurring";
 import { isFixed, MAX_CATEGORY, type Rule, type Transaction, type Upload } from "@/lib/money/types";
+import { AskAboutMoney } from "./ask-about-money";
 import { AskAtlas, ruleMatches } from "./ask-atlas";
 import { CategoryBars, MonthlyChart, Totals, UNSORTED } from "./overview";
 import { Repeats } from "./repeats";
@@ -160,6 +162,16 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
     requestAnimationFrame(() => document.getElementById("money-transactions")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
+  /** An answer can cover any dates and accounts, so the page switches to match it. */
+  function showAnswer(title: string, ids: string[], span: Span | null) {
+    setAccount(null);
+    if (span) {
+      setCustom(span);
+      setPeriod("custom");
+    } else setPeriod("all");
+    showTransactions({ atlas: { title, ids } });
+  }
+
   const uploadDialog = (
     <UploadDialog
       open={uploading}
@@ -227,6 +239,8 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
             <FileUp className="size-[18px]" strokeWidth={1.75} /> Upload CSV
           </button>
         </header>
+
+        <AskAboutMoney transactions={transactions} today={today} onShow={showAnswer} />
 
         <div className="flex flex-wrap items-center gap-2 px-1">
           <div role="group" aria-label="Period" className="flex flex-wrap gap-1.5">
