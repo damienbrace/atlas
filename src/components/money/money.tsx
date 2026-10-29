@@ -1,6 +1,7 @@
 "use client";
 
-import { FileUp, Undo2 } from "lucide-react";
+import { FileUp, Lightbulb, Undo2 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition, type FormEvent } from "react";
 import {
@@ -23,7 +24,6 @@ import { Dialog } from "@/components/dialog";
 import { useToast } from "@/components/toast";
 import { addDays, dayKey, parseDay, shortDay } from "@/lib/life/days";
 import { findIssues, ruleMatches, safePattern, type Issue } from "@/lib/money/checks";
-import { findHabits } from "@/lib/money/habits";
 import { merchantName, titleCase } from "@/lib/money/merchant";
 import {
   inRange,
@@ -40,13 +40,11 @@ import {
 import type { Span } from "@/lib/money/question";
 import { findRecurring } from "@/lib/money/recurring";
 import { expandSplits, splitByShares } from "@/lib/money/split";
-import { auditSubscriptions } from "@/lib/money/subscriptions";
 import { isFixed, MAX_CATEGORY, money, type MoneyFlag, type Rule, type SplitPart, type Transaction, type Upload } from "@/lib/money/types";
 import { UpAccounts } from "./accounts";
 import { AskAboutMoney } from "./ask-about-money";
 import { AskAtlas } from "./ask-atlas";
 import { ThingsToCheck, type FlagItem } from "./checks";
-import { Habits, Subscriptions } from "./insights";
 import { CategoryBars, SpendingChart, Totals, UNSORTED, type ChartUnit } from "./overview";
 import { Repeats } from "./repeats";
 import { SplitDialog } from "./split-dialog";
@@ -91,6 +89,8 @@ interface MoneyProps {
   up: UpStatus | null;
   ownerName: string;
   today: string;
+  /** Opens on one business's payments (from Insights). */
+  initialMerchant?: string;
 }
 
 /** This month if it has some activity yet, else the last 3 months, else everything. */
@@ -126,7 +126,7 @@ const chip = (on: boolean) =>
     on ? "border-ink/50 bg-white/[0.08] text-ink" : "border-line-strong text-ink-soft hover:border-faint"
   }`;
 
-export function Money({ transactions: fromServer, rules, categories: savedCategories, uploads, flags, leftChecks, reviewedAt, up, ownerName, today }: MoneyProps) {
+export function Money({ transactions: fromServer, rules, categories: savedCategories, uploads, flags, leftChecks, reviewedAt, up, ownerName, today, initialMerchant }: MoneyProps) {
   const router = useRouter();
   const toast = useToast();
   const [, startRefresh] = useTransition();
@@ -156,10 +156,10 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
   const [addedCategories, setAddedCategories] = useState<string[]>([]);
   const categories = [...savedCategories, ...addedCategories.filter((c) => !savedCategories.includes(c))];
 
-  const [period, setPeriod] = useState<PeriodId>(() => defaultPeriod(fromServer, today));
+  const [period, setPeriod] = useState<PeriodId>(() => (initialMerchant ? "all" : defaultPeriod(fromServer, today)));
   const [custom, setCustom] = useState<Range>({ from: monthStart(today), to: today });
   const [account, setAccount] = useState<string | null>(null);
-  const [filters, setFilters] = useState<ListFilters>(NO_FILTERS);
+  const [filters, setFilters] = useState<ListFilters>(() => (initialMerchant ? { ...NO_FILTERS, merchant: initialMerchant } : NO_FILTERS));
   const [chartUnit, setChartUnit] = useState<ChartUnit>("month");
   const [uploading, setUploading] = useState(false);
   const [naming, setNaming] = useState<Transaction | null>(null);
@@ -193,8 +193,6 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
   // The accounts card covers every account, whichever one the page is showing.
   const countedAll = useMemo(() => transactions.filter((t) => !t.excluded), [transactions]);
   const allRecurring = useMemo(() => (account ? findRecurring(countedAll, today) : recurring), [account, countedAll, recurring, today]);
-  const habits = useMemo(() => findHabits(countedAll, today), [countedAll, today]);
-  const subscriptions = useMemo(() => auditSubscriptions(countedAll, allRecurring, today), [countedAll, allRecurring, today]);
   /** A business's payments, from any time, in the list. */
   const showMerchant = (name: string) => {
     setPeriod("all");
@@ -262,6 +260,11 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // Arriving from Insights with a business: straight to its payments.
+  useEffect(() => {
+    if (initialMerchant) document.getElementById("money-transactions")?.scrollIntoView({ block: "start" });
+  }, [initialMerchant]);
 
   /** How these transactions are sorted now, to put back later. */
   const snapshot = (ids: string[]): SortingSnapshot[] => {
@@ -596,6 +599,12 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
               <Undo2 className="size-[18px] shrink-0" strokeWidth={1.75} /> Undo
               {undos.length > 0 && <span className="hidden max-w-[14rem] truncate font-normal text-muted lg:inline">{undos.at(-1)!.label}</span>}
             </button>
+            <Link
+              href="/money/insights"
+              className="flex h-10 items-center gap-2 rounded-xl border border-line-strong px-4 text-[14.5px] font-medium hover:border-faint hover:bg-white/[0.03]"
+            >
+              <Lightbulb className="size-[18px]" strokeWidth={1.75} /> Insights
+            </Link>
             <UpConnect status={up} today={today} onChanged={refresh} />
             <button
               type="button"
@@ -724,12 +733,6 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
                   setPeriod("custom");
                 }}
               />
-            </div>
-            <div className="order-3">
-              <Habits habits={habits} onPick={showMerchant} />
-            </div>
-            <div className="order-3">
-              <Subscriptions audit={subscriptions} onPick={showMerchant} />
             </div>
             <div className="order-5">
               <Repeats items={recurring} onPick={(r) => showMerchant(r.name)} />

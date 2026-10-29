@@ -10,8 +10,9 @@ export const metadata: Metadata = { title: "Money · Atlas" };
 // Sorting a round of merchants with Claude can take a while; the page's Server Functions share this.
 export const maxDuration = 60;
 
-export default async function MoneyPage() {
+export default async function MoneyPage({ searchParams }: PageProps<"/money">) {
   await connection();
+  const { merchant } = await searchParams;
   const [transactions, rules, categories, uploads, flags, leftChecks, reviewedAt, up] = await Promise.all([
     listTransactions(),
     listRules(),
@@ -34,6 +35,7 @@ export default async function MoneyPage() {
       up={up}
       ownerName={env.ownerName}
       today={dayKey(new Date())}
+      initialMerchant={typeof merchant === "string" && merchant ? merchant : undefined}
     />
   );
 }
