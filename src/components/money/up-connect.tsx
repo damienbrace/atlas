@@ -159,22 +159,27 @@ export function UpConnect({ status, today, onChanged }: UpConnectProps) {
             </div>
             <ol className="flex list-decimal flex-col gap-1.5 pl-5 text-[14.5px] leading-relaxed text-ink-soft">
               <li>
-                Open{" "}
-                <a
-                  href="https://api.up.com.au/getting_started"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-teal underline underline-offset-2"
-                >
-                  api.up.com.au/getting_started <ExternalLink className="size-3.5" />
-                </a>{" "}
-                and follow the steps with your Up app.
+                In the Up app, swipe right and tap <span className="text-ink">Data sharing</span>, then{" "}
+                <span className="text-ink">Personal Access Token</span>, then <span className="text-ink">Generate a token</span>.
               </li>
+              <li>Pick the longest time it can last, so syncing doesn&apos;t stop.</li>
               <li>
-                Copy the personal access token it gives you. It starts with <span className="font-mono text-[13.5px] text-ink">up:yeah:</span>
+                Copy the token. It starts with <span className="font-mono text-[13.5px] text-ink">up:yeah:</span>
               </li>
               <li>Paste it here.</li>
             </ol>
+            <p className="-mt-2 text-[13px] text-muted">
+              If the app shows an error there, update the Up app and try again, or use{" "}
+              <a
+                href="https://api.up.com.au"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-teal underline underline-offset-2"
+              >
+                api.up.com.au <ExternalLink className="size-3.5" />
+              </a>
+              .
+            </p>
             <input
               name="token"
               type="password"
