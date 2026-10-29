@@ -40,6 +40,7 @@ import type { Span } from "@/lib/money/question";
 import { findRecurring } from "@/lib/money/recurring";
 import { expandSplits, splitByShares } from "@/lib/money/split";
 import { isFixed, MAX_CATEGORY, money, type MoneyFlag, type Rule, type SplitPart, type Transaction, type Upload } from "@/lib/money/types";
+import { UpAccounts } from "./accounts";
 import { AskAboutMoney } from "./ask-about-money";
 import { AskAtlas } from "./ask-atlas";
 import { ThingsToCheck, type FlagItem } from "./checks";
@@ -103,6 +104,19 @@ function checkedLabel(reviewedAt: number | null, today: string) {
   const days = Math.round((parseDay(today).getTime() - parseDay(dayKey(new Date(reviewedAt))).getTime()) / 86_400_000);
   return days <= 0 ? "today" : days === 1 ? "yesterday" : `${days} days ago`;
 }
+
+/** The period in words, for "+$420 this month". */
+const PERIOD_WORDS: Record<PeriodId, string> = {
+  week: "this week",
+  "last-week": "last week",
+  month: "this month",
+  "last-month": "last month",
+  "3m": "in 3 months",
+  "12m": "in 12 months",
+  fy: "this FY",
+  all: "all up",
+  custom: "in these dates",
+};
 
 const chip = (on: boolean) =>
   `h-9 shrink-0 rounded-lg border px-3 text-[13.5px] transition-colors ${
@@ -173,6 +187,9 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
   const previous = before?.range.from && before.range.from >= earliest ? before : null;
   const earlier = previous ? parts.filter((t) => inRange(t.day, previous.range)) : [];
   const recurring = useMemo(() => findRecurring(counted, today), [counted, today]);
+  // The accounts card covers every account, whichever one the page is showing.
+  const countedAll = useMemo(() => transactions.filter((t) => !t.excluded), [transactions]);
+  const allRecurring = useMemo(() => (account ? findRecurring(countedAll, today) : recurring), [account, countedAll, recurring, today]);
 
   const issues = useMemo(
     () => findIssues(transactions, rules, savedCategories, ownerName, left).filter((i) => !hidden.has(i.id)),
@@ -677,6 +694,11 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
             </div>
           </div>
           <div className="contents xl:flex xl:min-w-0 xl:flex-col xl:gap-4">
+            {up && up.accounts.length > 0 && (
+              <div className="order-first">
+                <UpAccounts up={up} transactions={countedAll} range={range} periodWords={PERIOD_WORDS[period]} recurring={allRecurring} today={today} />
+              </div>
+            )}
             <div className="order-2">
               <CategoryBars summary={summary} selected={filters.category} onSelect={(category) => setFilters((f) => ({ ...f, category }))} />
             </div>

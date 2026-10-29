@@ -22,6 +22,8 @@ export interface Transaction {
   atlasCategory?: string | null;
   /** I've left it out of the totals (a one-off like a shed deposit): still listed, never counted. */
   excluded?: boolean;
+  /** From Up: still pending (HELD) or done (SETTLED). Null for CSV rows. */
+  status?: "HELD" | "SETTLED" | null;
 }
 
 /** A group of payments Atlas's review thinks is in the wrong category. */

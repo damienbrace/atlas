@@ -16,11 +16,11 @@ export interface UpStatus {
   /** Up calls Atlas on every transaction; otherwise Atlas catches up each morning and on Sync now. */
   live: boolean;
   lastSyncAt: number | null;
-  accounts: { name: string; type: string; balanceCents: number }[];
+  accounts: { name: string; type: string; balanceCents: number; joint?: boolean }[];
   error: string | null;
 }
 
-function syncedLabel(at: number | null, today: string) {
+export function syncedLabel(at: number | null, today: string) {
   if (at === null) return "not synced yet";
   const day = dayKey(new Date(at));
   return `synced ${day === today ? clock(new Date(at)) : shortDay(day)}`;

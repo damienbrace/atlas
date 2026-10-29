@@ -325,7 +325,10 @@ function Row({ t, share, categories, thisYear, onCategorise, onNewCategory, onSp
         {t.excluded ? (
           <span className="block text-[11.5px] text-amber">not in totals</span>
         ) : (
-          shown !== t.amountCents && <span className="block text-[11.5px] text-faint">of {money(t.amountCents, { sign: true })}</span>
+          <>
+            {shown !== t.amountCents && <span className="block text-[11.5px] text-faint">of {money(t.amountCents, { sign: true })}</span>}
+            {t.status === "HELD" && <span className="block text-[11.5px] text-amber">pending</span>}
+          </>
         )}
       </span>
     </li>

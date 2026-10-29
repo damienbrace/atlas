@@ -25,6 +25,7 @@ interface TransactionRow {
   splits: SplitPart[] | null;
   atlas_category: string | null;
   excluded: boolean;
+  status: string | null;
 }
 
 const isSortedBy = (v: string | null): v is SortedBy => v === "atlas" || v === "rule" || v === "me" || v === "bank";
@@ -42,6 +43,7 @@ const toTransaction = (r: TransactionRow): Transaction => ({
   splits: r.splits,
   atlasCategory: r.atlas_category,
   excluded: r.excluded,
+  status: r.status === "HELD" || r.status === "SETTLED" ? r.status : null,
 });
 
 /** Plenty for years of personal spending; the page filters it in the browser. */
@@ -50,7 +52,7 @@ const MAX_LOADED = 25_000;
 export async function listTransactions() {
   const rows = await sql<TransactionRow[]>`
     SELECT t.id, t.account, t.day, t.amount_cents, t.description, t.merchant_key, m.name AS merchant, t.category, t.sorted_by, t.splits, m.category AS atlas_category,
-      t.excluded
+      t.excluded, t.status
     FROM money_transactions t LEFT JOIN money_merchants m ON m.key = t.merchant_key
     ORDER BY t.day DESC, t.created_at DESC, t.id LIMIT ${MAX_LOADED}`;
   return rows.map(toTransaction);
@@ -368,7 +370,7 @@ export interface UpConnection {
   webhookSecret: string | null;
   connectedAt: number;
   lastSyncAt: number | null;
-  accounts: { id: string; name: string; type: string; balanceCents: number }[];
+  accounts: { id: string; name: string; type: string; balanceCents: number; joint?: boolean }[];
   /** Why the last sync failed, for the page. */
   error: string | null;
 }
@@ -381,7 +383,7 @@ export const setUpConnection = (connection: UpConnection | null) => (connection 
 export async function getUpStatus() {
   const c = await getUpConnection();
   if (!c) return null;
-  return { live: c.webhookId !== null, lastSyncAt: c.lastSyncAt, accounts: c.accounts.map((a) => ({ name: a.name, type: a.type, balanceCents: a.balanceCents })), error: c.error };
+  return { live: c.webhookId !== null, lastSyncAt: c.lastSyncAt, accounts: c.accounts.map((a) => ({ name: a.name, type: a.type, balanceCents: a.balanceCents, joint: a.joint })), error: c.error };
 }
 
 /** The latest day there are transactions for, or null. */

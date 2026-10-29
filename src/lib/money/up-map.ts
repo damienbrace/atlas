@@ -30,7 +30,7 @@ export interface UpTransaction {
 
 export interface UpAccount {
   id: string;
-  attributes: { displayName: string; accountType: string; balance: UpMoney };
+  attributes: { displayName: string; accountType: string; ownershipType?: string; balance: UpMoney };
 }
 
 export interface UpRow {

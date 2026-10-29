@@ -90,7 +90,13 @@ async function connection() {
 }
 
 const accountList = (list: UpAccount[]): UpConnection["accounts"] =>
-  list.map((a) => ({ id: a.id, name: a.attributes.displayName, type: a.attributes.accountType, balanceCents: a.attributes.balance.valueInBaseUnits }));
+  list.map((a) => ({
+    id: a.id,
+    name: a.attributes.displayName,
+    type: a.attributes.accountType,
+    balanceCents: a.attributes.balance.valueInBaseUnits,
+    joint: a.attributes.ownershipType === "JOINT",
+  }));
 
 /** Where a first sync starts: a few days before the CSVs end, so the overlap gets matched up; else two years back. */
 async function firstSince() {
@@ -149,12 +155,10 @@ export async function upEvent(type: string, transactionId: string) {
     await deleteUpRows([transactionId]);
     return;
   }
-  const t = await up.transaction(token, transactionId);
-  let accounts = c.accounts;
-  if (!accounts.some((a) => a.id === t.relationships.account.data.id)) {
-    accounts = accountList(await up.accounts(token));
-    await setUpConnection({ ...c, accounts });
-  }
+  // Balances move with every transaction, so they're refreshed along with it.
+  const [t, list] = await Promise.all([up.transaction(token, transactionId), up.accounts(token)]);
+  const accounts = accountList(list);
+  await setUpConnection({ ...c, accounts });
   const name = accounts.find((a) => a.id === t.relationships.account.data.id)?.name;
   const row = name ? toRow(t, name) : null;
   if (!row) return;
