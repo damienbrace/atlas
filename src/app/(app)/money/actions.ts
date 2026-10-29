@@ -1,22 +1,39 @@
 "use server";
 
-import { describeAiError, interpretMoneyInstruction, interpretMoneyQuestion, sortMerchants, type MoneyQuestionResult } from "@/lib/ai/claude";
+import {
+  describeAiError,
+  interpretMoneyInstruction,
+  interpretMoneyQuestion,
+  reviewSorting,
+  sortMerchants,
+  type MoneyQuestionResult,
+} from "@/lib/ai/claude";
 import { signedIn } from "@/lib/auth/session";
 import { dayKey, isDayKey } from "@/lib/life/days";
 import type { CsvRow } from "@/lib/money/csv";
 import {
   addCategories,
+  addFlags,
   addRules,
   addTransactions,
   countUnsortedMerchants,
   deleteRule,
   deleteUpload,
+  flagKeys,
   getCategories,
+  getFlag,
+  getReviewedAt,
+  leaveCheck,
   listRules,
+  merchantsByKey,
   merchantSummary,
+  paymentsIn,
   resort,
+  reviewGroups,
   saveMerchants,
   setCategory,
+  setFlagStatus,
+  setReviewedAt,
   setSplits,
   startUpload,
   transactionAmounts,
@@ -40,6 +57,8 @@ const SORT_BATCH = 80;
 const RULE_CONTEXT = 600;
 /** Earlier questions sent along, so follow-ups make sense. */
 const EARLIER_QUESTIONS = 3;
+/** Lines of payments per Claude request when Atlas reviews the sorting. */
+const REVIEW_BATCH = 150;
 
 const cleanText = (value: unknown, max: number) =>
   typeof value === "string" && value.trim() && value.length <= max ? value.replace(/\s+/g, " ").trim() : null;
@@ -313,6 +332,89 @@ export async function askAboutMoney(
       return { ok: true, reply: result.reply.trim() || "I can answer questions about what you've spent and what's come in.", query: null };
     }
     return { ok: true, reply: "", query: toQuery(result, text, categories, [...merchants.keys()], span.accounts) };
+  } catch (error) {
+    return { ok: false, error: describeAiError(error) };
+  }
+}
+
+// ---- Checking -----------------------------------------------------------------------------
+
+/**
+ * Atlas reads how payments are sorted and flags the ones that look wrong. "new" covers only
+ * what's arrived or changed since the last review (after an upload); "all" is everything.
+ * A flag that was raised before, fixed or left, isn't raised again.
+ */
+export async function reviewWithAtlas(
+  scope: "new" | "all",
+): Promise<{ ok: true; checked: number; flagged: number } | { ok: false; error: string }> {
+  if (!(await signedIn())) return { ok: false, error: "Sign in again." };
+  if (scope !== "new" && scope !== "all") return { ok: false, error: "Try again." };
+  const startedAt = Date.now();
+  const since = scope === "new" ? await getReviewedAt() : null;
+  // Never reviewed: start counting from now rather than reading everything unasked.
+  if (scope === "new" && since === null) {
+    await setReviewedAt(startedAt);
+    return { ok: true, checked: 0, flagged: 0 };
+  }
+  const [groups, categories, rules, raised] = await Promise.all([reviewGroups(since), getCategories(), listRules(), flagKeys()]);
+  if (groups.length === 0) {
+    await setReviewedAt(startedAt);
+    return { ok: true, checked: 0, flagged: 0 };
+  }
+  try {
+    const lines = groups.map((g) => ({ ...g, samples: g.samples.map((s) => cleanDescription(s).slice(0, 80)) }));
+    const batches = Array.from({ length: Math.ceil(lines.length / REVIEW_BATCH) }, (_, i) => lines.slice(i * REVIEW_BATCH, (i + 1) * REVIEW_BATCH));
+    const ruleText = rules.map((r) => `${r.pattern} → ${r.category}`);
+    const found = (await Promise.all(batches.map((b) => reviewSorting(b, categories, ruleText)))).flat();
+    const fresh = found.filter((f) => !raised.has(`${f.key}|${f.currentCategory}|${f.category}`));
+    await addFlags(fresh.map((f) => ({ merchantKey: f.key, currentCategory: f.currentCategory, category: f.category, reason: f.reason })));
+    await setReviewedAt(startedAt);
+    return { ok: true, checked: groups.length, flagged: fresh.length };
+  } catch (error) {
+    return { ok: false, error: describeAiError(error) };
+  }
+}
+
+/** Moves a flag's payments where Atlas suggested: Atlas's own read where it decided, my pick where a rule or I did. */
+export async function fixFlag(id: string) {
+  if (!(await signedIn())) return { ok: false as const };
+  if (!isId(id)) return { ok: false as const };
+  const flag = await getFlag(id);
+  if (!flag || !(await isCategory(flag.category))) return { ok: false as const };
+  const payments = await paymentsIn(flag.merchant_key, flag.current_category);
+  const byAtlas = payments.filter((p) => p.sorted_by === "atlas");
+  const others = payments.filter((p) => p.sorted_by !== "atlas").map((p) => p.id);
+  if (others.length) await setCategory(others, flag.category);
+  if (byAtlas.length) await saveMerchants([{ key: flag.merchant_key, name: byAtlas[0].name ?? titleCase(flag.merchant_key), category: flag.category }]);
+  await setFlagStatus(id, "fixed");
+  return { ok: true as const };
+}
+
+/** "Leave it" on a thing to check: an Atlas flag ("flag:<id>") or one of the page's own checks. */
+export async function leaveAlone(id: string) {
+  if (!(await signedIn())) return { ok: false as const };
+  if (typeof id !== "string" || id.length === 0 || id.length > 300) return { ok: false as const };
+  if (id.startsWith("flag:")) {
+    if (!isId(id.slice(5))) return { ok: false as const };
+    await setFlagStatus(id.slice(5), "left");
+  } else await leaveCheck(id);
+  return { ok: true as const };
+}
+
+/** Atlas reads these merchants again from scratch (say, a payback it once called income). */
+export async function resortMerchants(keys: string[]): Promise<{ ok: true; sorted: number } | { ok: false; error: string }> {
+  if (!(await signedIn())) return { ok: false, error: "Sign in again." };
+  if (!Array.isArray(keys) || keys.length === 0 || keys.length > 50 || !keys.every((k) => typeof k === "string" && k.length > 0 && k.length <= 80))
+    return { ok: false, error: "Try again." };
+  const [merchants, categories] = await Promise.all([merchantsByKey(keys), getCategories()]);
+  if (merchants.length === 0) return { ok: true, sorted: 0 };
+  try {
+    const sorted = await sortMerchants(
+      merchants.map((m) => ({ ...m, sample: cleanDescription(m.sample) })),
+      categories,
+    );
+    await saveMerchants(sorted);
+    return { ok: true, sorted: sorted.length };
   } catch (error) {
     return { ok: false, error: describeAiError(error) };
   }

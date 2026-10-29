@@ -18,6 +18,18 @@ export interface Transaction {
   splits?: SplitPart[] | null;
   /** On one part of a split payment (see expandSplits): the payment it came from. */
   splitOf?: string;
+  /** Atlas's own read of the merchant, even when a rule or I decided otherwise. */
+  atlasCategory?: string | null;
+}
+
+/** A group of payments Atlas's review thinks is in the wrong category. */
+export interface MoneyFlag {
+  id: string;
+  merchantKey: string;
+  /** Where the payments were when Atlas looked; the flag no longer applies once they've moved. */
+  currentCategory: string;
+  category: string;
+  reason: string;
 }
 
 export interface SplitPart {

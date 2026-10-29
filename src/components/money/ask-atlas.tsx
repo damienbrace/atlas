@@ -1,15 +1,17 @@
 "use client";
 
-import { Check, Pencil, X } from "lucide-react";
+import { Check, Pencil, TriangleAlert, X } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { askAtlasToSort, sortWithAtlas } from "@/app/(app)/money/actions";
 import { Sparkle } from "@/components/sparkle";
 import { useToast } from "@/components/toast";
-import { merchantName, normalise, patternMatches } from "@/lib/money/merchant";
+import { ruleImpact, ruleMatches } from "@/lib/money/checks";
+import { merchantName } from "@/lib/money/merchant";
 import { money, type Rule, type Transaction } from "@/lib/money/types";
 
 // Atlas's part of the Money page: sorting merchants it hasn't seen, and turning
-// "Caltex and BP are fuel" into rules that wait for Approve / Edit / Dismiss.
+// "Caltex and BP are fuel" into rules that wait for Approve / Edit / Dismiss. Each proposed
+// rule shows what it would move, and warns when that's payments sorted as different things.
 
 type Draft = Omit<Rule, "id">;
 
@@ -19,10 +21,32 @@ interface Proposal {
   newCategories: string[];
 }
 
-export function ruleMatches(rule: Draft, transactions: Transaction[]) {
-  const pattern = normalise(rule.pattern);
-  return transactions.filter(
-    (t) => patternMatches(pattern, t.merchantKey) && (rule.amountCents === null || Math.abs(t.amountCents) === rule.amountCents),
+/** What a proposed rule would move, before it's approved. */
+function RuleMoves({ rule, transactions }: { rule: Draft; transactions: Transaction[] }) {
+  const [open, setOpen] = useState(false);
+  const { moves, from, broad } = ruleImpact(rule, transactions);
+  if (moves.length === 0) return null;
+  return (
+    <div className={`basis-full rounded-lg px-3 py-2 text-[13px] ${broad ? "border border-amber/40 bg-amber/10 text-ink" : "bg-white/[0.03] text-muted"}`}>
+      <p>
+        {broad && <TriangleAlert className="mr-1.5 inline size-3.5 -translate-y-px text-amber" />}
+        Moves {moves.length} to {rule.category}: {from.map(([c, n]) => `${n} from ${c}`).join(", ")}.
+        {broad && " Those were sorted as quite different things, so check this rule isn't too broad."}{" "}
+        <button type="button" onClick={() => setOpen((on) => !on)} className="underline decoration-dotted underline-offset-2 hover:text-ink">
+          {open ? "Hide them" : "Show them"}
+        </button>
+      </p>
+      {open && (
+        <ul className="mt-1.5 flex flex-col gap-0.5 text-muted">
+          {moves.slice(0, 15).map((t) => (
+            <li key={t.id} className="truncate">
+              {t.description} <span className="text-faint">· now {t.category ?? "not sorted"}</span>
+            </li>
+          ))}
+          {moves.length > 15 && <li className="text-faint">and {moves.length - 15} more</li>}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -187,6 +211,7 @@ export function AskAtlas({ transactions, categories, rules, onApprove, onRemoveR
                     <span className={`text-[13px] ${hits.length ? "text-muted" : "text-amber"}`}>
                       {hits.length ? `${hits.length} transaction${hits.length === 1 ? "" : "s"} · ${names.join(", ")}` : "matches nothing yet"}
                     </span>
+                    <RuleMoves rule={r} transactions={transactions} />
                   </li>
                 );
               })}

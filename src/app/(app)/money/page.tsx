@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { connection } from "next/server";
 import { Money } from "@/components/money/money";
+import { env } from "@/lib/env";
 import { dayKey } from "@/lib/life/days";
-import { getCategories, listRules, listTransactions, listUploads } from "@/lib/money/db";
+import { getCategories, getLeftChecks, getReviewedAt, listFlags, listRules, listTransactions, listUploads } from "@/lib/money/db";
 
 export const metadata: Metadata = { title: "Money · Atlas" };
 
@@ -11,6 +12,26 @@ export const maxDuration = 60;
 
 export default async function MoneyPage() {
   await connection();
-  const [transactions, rules, categories, uploads] = await Promise.all([listTransactions(), listRules(), getCategories(), listUploads()]);
-  return <Money transactions={transactions} rules={rules} categories={categories} uploads={uploads} today={dayKey(new Date())} />;
+  const [transactions, rules, categories, uploads, flags, leftChecks, reviewedAt] = await Promise.all([
+    listTransactions(),
+    listRules(),
+    getCategories(),
+    listUploads(),
+    listFlags(),
+    getLeftChecks(),
+    getReviewedAt(),
+  ]);
+  return (
+    <Money
+      transactions={transactions}
+      rules={rules}
+      categories={categories}
+      uploads={uploads}
+      flags={flags}
+      leftChecks={leftChecks}
+      reviewedAt={reviewedAt}
+      ownerName={env.ownerName}
+      today={dayKey(new Date())}
+    />
+  );
 }

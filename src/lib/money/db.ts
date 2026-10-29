@@ -4,7 +4,7 @@ import { sql } from "@/lib/db";
 import { getSetting, setSetting } from "@/lib/life/settings";
 import type { CsvRow } from "./csv";
 import { merchantKey } from "./merchant";
-import { DEFAULT_CATEGORIES, TRANSFERS, type Rule, type SortedBy, type SplitPart, type Transaction, type Upload } from "./types";
+import { DEFAULT_CATEGORIES, TRANSFERS, type MoneyFlag, type Rule, type SortedBy, type SplitPart, type Transaction, type Upload } from "./types";
 
 // Money's storage. Sorting works in layers: my own picks ('me') and moves the bank's file
 // marked as between my accounts ('bank') beat rules, and rules beat Atlas's read of the
@@ -21,6 +21,7 @@ interface TransactionRow {
   category: string | null;
   sorted_by: string | null;
   splits: SplitPart[] | null;
+  atlas_category: string | null;
 }
 
 const isSortedBy = (v: string | null): v is SortedBy => v === "atlas" || v === "rule" || v === "me" || v === "bank";
@@ -36,6 +37,7 @@ const toTransaction = (r: TransactionRow): Transaction => ({
   category: r.category,
   sortedBy: isSortedBy(r.sorted_by) ? r.sorted_by : null,
   splits: r.splits,
+  atlasCategory: r.atlas_category,
 });
 
 /** Plenty for years of personal spending; the page filters it in the browser. */
@@ -43,7 +45,7 @@ const MAX_LOADED = 25_000;
 
 export async function listTransactions() {
   const rows = await sql<TransactionRow[]>`
-    SELECT t.id, t.account, t.day, t.amount_cents, t.description, t.merchant_key, m.name AS merchant, t.category, t.sorted_by, t.splits
+    SELECT t.id, t.account, t.day, t.amount_cents, t.description, t.merchant_key, m.name AS merchant, t.category, t.sorted_by, t.splits, m.category AS atlas_category
     FROM money_transactions t LEFT JOIN money_merchants m ON m.key = t.merchant_key
     ORDER BY t.day DESC, t.created_at DESC, t.id LIMIT ${MAX_LOADED}`;
   return rows.map(toTransaction);
@@ -242,4 +244,102 @@ export async function addRules(rules: Omit<Rule, "id">[]) {
 export async function deleteRule(id: string) {
   await sql`DELETE FROM money_rules WHERE id = ${id}`;
   await resort();
+}
+
+// ---- Checking ---------------------------------------------------------------------------
+
+const LEFT_KEY = "money.checksLeft";
+const REVIEWED_KEY = "money.reviewedAt";
+/** "Leave it" answers kept; old ones drop off. */
+const MAX_LEFT = 500;
+
+/** Things to check I've said to leave. */
+export const getLeftChecks = () => getSetting<string[]>(LEFT_KEY, []);
+
+export async function leaveCheck(id: string) {
+  const left = await getLeftChecks();
+  if (!left.includes(id)) await setSetting(LEFT_KEY, [...left, id].slice(-MAX_LEFT));
+}
+
+/** When Atlas last reviewed the sorting (ms), or null if it never has. */
+export const getReviewedAt = () => getSetting<number | null>(REVIEWED_KEY, null);
+export const setReviewedAt = (at: number) => setSetting(REVIEWED_KEY, at);
+
+export interface ReviewGroup {
+  key: string;
+  name: string | null;
+  category: string;
+  sortedBy: string;
+  count: number;
+  totalCents: number;
+  samples: string[];
+}
+
+/**
+ * Payments for Atlas to review, one line per merchant and category. With `since`, only
+ * what's new or changed since: new transactions, merchants Atlas first read, and anything
+ * a newer rule sorted. Moves the bank marked as transfers are left out.
+ */
+export async function reviewGroups(since: number | null) {
+  return sql<ReviewGroup[]>`
+    SELECT t.merchant_key AS key, max(m.name) AS name, t.category, t.sorted_by AS "sortedBy", count(*)::int AS count,
+      sum(t.amount_cents)::bigint AS "totalCents", (array_agg(DISTINCT t.description))[1:3] AS samples
+    FROM money_transactions t LEFT JOIN money_merchants m ON m.key = t.merchant_key
+    WHERE t.category IS NOT NULL AND t.sorted_by IS DISTINCT FROM 'bank' AND t.splits IS NULL
+      AND (${since}::bigint IS NULL OR t.created_at > ${since} OR m.created_at > ${since}
+        OR EXISTS (SELECT 1 FROM money_rules r WHERE r.created_at > ${since}
+          AND position(' ' || r.pattern || ' ' IN ' ' || t.merchant_key || ' ') > 0))
+    GROUP BY t.merchant_key, t.category, t.sorted_by
+    ORDER BY t.category, t.merchant_key`;
+}
+
+/** Open flags, for the page. */
+export async function listFlags(): Promise<MoneyFlag[]> {
+  const rows = await sql<{ id: string; merchant_key: string; current_category: string; category: string; reason: string }[]>`
+    SELECT id, merchant_key, current_category, category, reason FROM money_flags WHERE status = 'open' ORDER BY created_at`;
+  return rows.map((r) => ({ id: r.id, merchantKey: r.merchant_key, currentCategory: r.current_category, category: r.category, reason: r.reason }));
+}
+
+/** Every flag ever raised, open or not, so a review doesn't raise the same one again. */
+export async function flagKeys() {
+  const rows = await sql<{ merchant_key: string; current_category: string; category: string }[]>`
+    SELECT merchant_key, current_category, category FROM money_flags`;
+  return new Set(rows.map((r) => `${r.merchant_key}|${r.current_category}|${r.category}`));
+}
+
+export async function addFlags(flags: Omit<MoneyFlag, "id">[]) {
+  if (flags.length === 0) return;
+  const records = flags.map((f) => ({ id: randomUUID(), key: f.merchantKey, current: f.currentCategory, category: f.category, reason: f.reason }));
+  await sql`
+    INSERT INTO money_flags (id, merchant_key, current_category, category, reason, created_at)
+    SELECT f.id, f.key, f.current, f.category, f.reason, ${Date.now()}
+    FROM jsonb_to_recordset(${sql.json(records)}) AS f(id text, key text, current text, category text, reason text)`;
+}
+
+export async function getFlag(id: string) {
+  const [row] = await sql<{ merchant_key: string; current_category: string; category: string }[]>`
+    SELECT merchant_key, current_category, category FROM money_flags WHERE id = ${id} AND status = 'open'`;
+  return row ?? null;
+}
+
+export async function setFlagStatus(id: string, status: "fixed" | "left") {
+  await sql`UPDATE money_flags SET status = ${status} WHERE id = ${id}`;
+}
+
+/** A merchant's payments still in a category, with who put them there. */
+export async function paymentsIn(key: string, category: string) {
+  return sql<{ id: string; sorted_by: string | null; name: string | null }[]>`
+    SELECT t.id, t.sorted_by, m.name FROM money_transactions t LEFT JOIN money_merchants m ON m.key = t.merchant_key
+    WHERE t.merchant_key = ${key} AND t.category = ${category} AND t.sorted_by IS DISTINCT FROM 'bank' AND t.splits IS NULL`;
+}
+
+/** Merchants to read again, shaped like unsortedMerchants. */
+export async function merchantsByKey(keys: string[]) {
+  return sql<UnsortedMerchant[]>`
+    SELECT t.merchant_key AS key, count(*)::int AS count,
+      (array_agg(t.description ORDER BY t.day DESC))[1] AS sample,
+      (percentile_disc(0.5) WITHIN GROUP (ORDER BY t.amount_cents))::bigint AS "typicalCents"
+    FROM money_transactions t
+    WHERE t.merchant_key IN (SELECT jsonb_array_elements_text(${sql.json(keys)}))
+    GROUP BY t.merchant_key`;
 }

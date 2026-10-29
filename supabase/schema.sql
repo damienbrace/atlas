@@ -188,6 +188,19 @@ create table if not exists money_imports (
   created_at bigint not null
 );
 
+-- Payments Atlas thinks are in the wrong category, from its review after an upload or
+-- a "Check everything". Kept after they're fixed or left, so they don't come back.
+create table if not exists money_flags (
+  id text primary key,
+  merchant_key text not null,
+  current_category text not null,     -- where the payments were when Atlas looked
+  category text not null,             -- where Atlas thinks they belong
+  reason text not null,
+  status text not null default 'open',  -- 'open', 'fixed' or 'left'
+  created_at bigint not null
+);
+create index if not exists money_flags_key on money_flags (merchant_key);
+
 -- ---- Lock the public API out ------------------------------------------------
 
 alter table journal enable row level security;
@@ -208,3 +221,4 @@ alter table money_transactions enable row level security;
 alter table money_merchants enable row level security;
 alter table money_rules enable row level security;
 alter table money_imports enable row level security;
+alter table money_flags enable row level security;

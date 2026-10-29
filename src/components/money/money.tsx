@@ -3,11 +3,22 @@
 import { FileUp } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition, type FormEvent } from "react";
-import { approveRules, categorise, createCategory, removeRule, splitTransactions } from "@/app/(app)/money/actions";
+import {
+  approveRules,
+  categorise,
+  createCategory,
+  fixFlag,
+  leaveAlone,
+  removeRule,
+  resortMerchants,
+  reviewWithAtlas,
+  splitTransactions,
+} from "@/app/(app)/money/actions";
 import { Dialog } from "@/components/dialog";
 import { useToast } from "@/components/toast";
-import { addDays, shortDay } from "@/lib/life/days";
-import { merchantName, normalise, patternMatches } from "@/lib/money/merchant";
+import { addDays, dayKey, parseDay, shortDay } from "@/lib/life/days";
+import { findIssues, ruleMatches, safePattern, type Issue } from "@/lib/money/checks";
+import { merchantName } from "@/lib/money/merchant";
 import {
   inRange,
   monthlySpending,
@@ -23,9 +34,10 @@ import {
 import type { Span } from "@/lib/money/question";
 import { findRecurring } from "@/lib/money/recurring";
 import { expandSplits, splitByShares } from "@/lib/money/split";
-import { isFixed, MAX_CATEGORY, type Rule, type SplitPart, type Transaction, type Upload } from "@/lib/money/types";
+import { isFixed, MAX_CATEGORY, type MoneyFlag, type Rule, type SplitPart, type Transaction, type Upload } from "@/lib/money/types";
 import { AskAboutMoney } from "./ask-about-money";
-import { AskAtlas, ruleMatches } from "./ask-atlas";
+import { AskAtlas } from "./ask-atlas";
+import { ThingsToCheck, type FlagItem } from "./checks";
 import { CategoryBars, SpendingChart, Totals, UNSORTED, type ChartUnit } from "./overview";
 import { Repeats } from "./repeats";
 import { SplitDialog } from "./split-dialog";
@@ -44,6 +56,13 @@ interface MoneyProps {
   rules: Rule[];
   categories: string[];
   uploads: Upload[];
+  /** Atlas's open review flags. */
+  flags: MoneyFlag[];
+  /** Things to check I've said to leave. */
+  leftChecks: string[];
+  /** When Atlas last reviewed the sorting (ms). */
+  reviewedAt: number | null;
+  ownerName: string;
   today: string;
 }
 
@@ -55,10 +74,11 @@ function defaultPeriod(transactions: Transaction[], today: string): PeriodId {
   return "all";
 }
 
-/** The words a rule should look for: Atlas's name for the merchant if it fits, else the whole key. */
-function patternFor(t: Transaction) {
-  const name = normalise(t.merchant ?? "");
-  return name && patternMatches(name, t.merchantKey) ? name : t.merchantKey;
+/** "today", "yesterday", "4 days ago" */
+function checkedLabel(reviewedAt: number | null, today: string) {
+  if (reviewedAt === null) return null;
+  const days = Math.round((parseDay(today).getTime() - parseDay(dayKey(new Date(reviewedAt))).getTime()) / 86_400_000);
+  return days <= 0 ? "today" : days === 1 ? "yesterday" : `${days} days ago`;
 }
 
 const chip = (on: boolean) =>
@@ -66,7 +86,7 @@ const chip = (on: boolean) =>
     on ? "border-ink/50 bg-white/[0.08] text-ink" : "border-line-strong text-ink-soft hover:border-faint"
   }`;
 
-export function Money({ transactions: fromServer, rules, categories: savedCategories, uploads, today }: MoneyProps) {
+export function Money({ transactions: fromServer, rules, categories: savedCategories, uploads, flags, leftChecks, reviewedAt, ownerName, today }: MoneyProps) {
   const router = useRouter();
   const toast = useToast();
   const [, startRefresh] = useTransition();
@@ -97,6 +117,10 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
   const [uploading, setUploading] = useState(false);
   const [naming, setNaming] = useState<Transaction | null>(null);
   const [splitting, setSplitting] = useState<Transaction | null>(null);
+  // Things to check: what I've left or am fixing hides straight away.
+  const [left, setLeft] = useState(() => new Set(leftChecks));
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [reviewing, setReviewing] = useState<"new" | "all" | null>(null);
 
   const accounts = [...new Set([...uploads.map((u) => u.account), ...transactions.map((t) => t.account)])];
   const mine = useMemo(() => (account ? transactions.filter((t) => t.account === account) : transactions), [transactions, account]);
@@ -113,6 +137,21 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
   const previous = before?.range.from && before.range.from >= earliest ? before : null;
   const earlier = previous ? parts.filter((t) => inRange(t.day, previous.range)) : [];
   const recurring = useMemo(() => findRecurring(mine, today), [mine, today]);
+
+  const issues = useMemo(
+    () => findIssues(transactions, rules, savedCategories, ownerName, left).filter((i) => !hidden.has(i.id)),
+    [transactions, rules, savedCategories, ownerName, left, hidden],
+  );
+  // A flag stops applying once its payments have moved, however that happened.
+  const flagItems = useMemo<FlagItem[]>(
+    () =>
+      flags.flatMap((flag) => {
+        if (hidden.has(`flag:${flag.id}`)) return [];
+        const group = transactions.filter((t) => t.merchantKey === flag.merchantKey && t.category === flag.currentCategory && !t.splits);
+        return group.length ? [{ flag, ids: group.map((t) => t.id), example: group[0].description }] : [];
+      }),
+    [flags, hidden, transactions],
+  );
 
   // The chart follows the category filter, and ends with the period's last month or week.
   const chartSource = filters.category ? parts.filter((t) => (filters.category === UNSORTED ? t.category === null : t.category === filters.category)) : parts;
@@ -135,13 +174,99 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
       return toast({ message: "Couldn't change that category" });
     }
     if (category === null) return refresh();
-    const others = transactions.filter((o) => o.id !== t.id && o.merchantKey === t.merchantKey && !isFixed(o.sortedBy) && o.category !== category);
+    // A rule for the rest, worded so it can't sweep up payments that were for other things.
+    const pattern = safePattern(t, category, transactions);
+    const others = ruleMatches({ pattern, category, amountCents: null }, transactions).filter(
+      (o) => o.id !== t.id && !isFixed(o.sortedBy) && o.category !== category,
+    );
     if (others.length === 0) return toast({ message: `Moved to ${category}` });
     toast({
       message: `Moved to ${category}`,
-      actionLabel: `All ${others.length + 1} from ${merchantName(t)}`,
-      onAction: () => void saveRules([{ pattern: patternFor(t), category, amountCents: null }], []),
+      actionLabel: pattern === t.merchantKey ? `All ${others.length + 1} like this` : `All ${others.length + 1} from ${merchantName(t)}`,
+      onAction: () => void saveRules([{ pattern, category, amountCents: null }], []),
     });
+  }
+
+  /** My pick for many payments at once; undo hands them back to rules and Atlas. */
+  async function pickMany(ids: string[], category: string) {
+    setPicks((p) => ({ ...p, ...Object.fromEntries(ids.map((id) => [id, { category, sortedBy: "me" as const, splits: null }])) }));
+    const res = await categorise(ids, category).catch(() => ({ ok: false as const }));
+    if (!res.ok) {
+      unpick(ids);
+      toast({ message: "Couldn't move those" });
+      return false;
+    }
+    toast({
+      message: `Moved ${ids.length} to ${category}`,
+      onAction: () => void categorise(ids, null).then(refresh),
+    });
+    return true;
+  }
+
+  // ---- Things to check ----
+
+  const hide = (id: string) => setHidden((h) => new Set(h).add(id));
+  const unhide = (id: string) =>
+    setHidden((h) => {
+      const rest = new Set(h);
+      rest.delete(id);
+      return rest;
+    });
+
+  async function fixIssue(issue: Issue) {
+    const fix = issue.fix;
+    hide(issue.id);
+    let ok = true;
+    if (fix.type === "remove-rule") {
+      const rule = rules.find((r) => r.id === fix.ruleId);
+      if (rule) await deleteRule(rule);
+    } else if (fix.type === "reread") {
+      const res = await resortMerchants(fix.keys).catch(() => ({ ok: false as const, error: "Couldn't reach Atlas. Try again." }));
+      ok = res.ok;
+      toast({ message: res.ok ? "Atlas sorted it again" : res.error });
+      if (res.ok) refresh();
+    } else if (fix.type === "rule") {
+      ok = await saveRules([{ pattern: fix.pattern, category: fix.category, amountCents: null }], []);
+    } else {
+      ok = await pickMany(fix.ids, fix.category);
+    }
+    if (!ok) unhide(issue.id);
+  }
+
+  async function fixAtlasFlag(flag: MoneyFlag) {
+    hide(`flag:${flag.id}`);
+    const res = await fixFlag(flag.id).catch(() => ({ ok: false as const }));
+    if (!res.ok) {
+      unhide(`flag:${flag.id}`);
+      return toast({ message: "Couldn't move those" });
+    }
+    toast({ message: `Moved to ${flag.category}` });
+    refresh();
+  }
+
+  async function leave(id: string) {
+    if (id.startsWith("flag:")) hide(id);
+    else setLeft((l) => new Set(l).add(id));
+    const res = await leaveAlone(id).catch(() => ({ ok: false as const }));
+    if (res.ok) return;
+    unhide(id);
+    setLeft((l) => {
+      const rest = new Set(l);
+      rest.delete(id);
+      return rest;
+    });
+    toast({ message: "Couldn't save that" });
+  }
+
+  /** Atlas reviews the sorting: just what's new (after an upload) or everything. */
+  async function review(scope: "new" | "all") {
+    setReviewing(scope);
+    const res = await reviewWithAtlas(scope).catch(() => ({ ok: false as const, error: "Couldn't reach Atlas. Try again." }));
+    setReviewing(null);
+    if (!res.ok) return toast({ message: res.error });
+    if (res.flagged) toast({ message: `Atlas found ${res.flagged} thing${res.flagged === 1 ? "" : "s"} to check` });
+    else if (scope === "all") toast({ message: "Atlas checked everything: nothing looks off" });
+    refresh();
   }
 
   /** Saves splits; each payment's parts must add up to it. */
@@ -234,6 +359,7 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
         toast({ message: `Added ${added.toLocaleString("en-AU")}${skipped ? `, ${skipped.toLocaleString("en-AU")} already here` : ""}` });
         if (added && period !== "all" && !fromServer.length) setPeriod("all");
         refresh();
+        if (added) void review("new");
       }}
       onRemoved={() => {
         toast({ message: "Upload removed" });
@@ -349,14 +475,28 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
         {/* Phones get one column in reading order; wide screens get two. */}
         <div className="flex flex-col gap-4 xl:grid xl:grid-cols-[minmax(0,1fr)_400px] xl:items-start">
           <div className="contents xl:flex xl:min-w-0 xl:flex-col xl:gap-4">
-            <div className="order-1">
+            <div className="order-1 flex flex-col gap-4">
+              <ThingsToCheck
+                issues={issues}
+                flags={flagItems}
+                reviewing={reviewing}
+                checked={checkedLabel(reviewedAt, today)}
+                onFix={(issue) => void fixIssue(issue)}
+                onFixFlag={(flag) => void fixAtlasFlag(flag)}
+                onLeave={(id) => void leave(id)}
+                onShow={(title, ids) => showAnswer(title, ids, null, true)}
+                onCheckAll={() => void review("all")}
+              />
               <AskAtlas
                 transactions={transactions}
                 categories={categories}
                 rules={rules}
                 onApprove={saveRules}
                 onRemoveRule={(r) => void deleteRule(r)}
-                onSorted={refresh}
+                onSorted={() => {
+                  refresh();
+                  void review("new");
+                }}
               />
             </div>
             <div id="money-transactions" className="order-4 scroll-mt-4">
