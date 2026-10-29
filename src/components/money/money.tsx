@@ -535,17 +535,17 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {undos.length > 0 && (
-              <button
-                type="button"
-                onClick={() => void undo()}
-                title={`Undo ${undos.at(-1)!.label} (Ctrl+Z)`}
-                className="flex h-10 max-w-full items-center gap-2 rounded-xl border border-line-strong px-4 text-[14.5px] font-medium hover:border-faint hover:bg-white/[0.03]"
-              >
-                <Undo2 className="size-[18px] shrink-0" strokeWidth={1.75} /> Undo
-                <span className="hidden max-w-[14rem] truncate font-normal text-muted lg:inline">{undos.at(-1)!.label}</span>
-              </button>
-            )}
+            {/* Always there, so it's easy to find; greyed out until there's a change to take back. */}
+            <button
+              type="button"
+              onClick={() => void undo()}
+              disabled={undos.length === 0}
+              title={undos.length ? `Undo ${undos.at(-1)!.label} (Ctrl+Z)` : "Nothing to undo yet"}
+              className="flex h-10 max-w-full items-center gap-2 rounded-xl border border-line-strong px-4 text-[14.5px] font-medium hover:border-faint hover:bg-white/[0.03] disabled:opacity-40 disabled:hover:border-line-strong disabled:hover:bg-transparent"
+            >
+              <Undo2 className="size-[18px] shrink-0" strokeWidth={1.75} /> Undo
+              {undos.length > 0 && <span className="hidden max-w-[14rem] truncate font-normal text-muted lg:inline">{undos.at(-1)!.label}</span>}
+            </button>
             <UpConnect status={up} today={today} onChanged={refresh} />
             <button
               type="button"
