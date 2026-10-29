@@ -50,7 +50,7 @@ export function Sidebar() {
   );
 }
 
-const MOBILE_TABS = ["brief", "inbox"];
+const MOBILE_TABS = ["brief", "calendar"];
 const MOBILE_TABS_RIGHT = ["tasks"];
 
 function MobileTab({ section, active }: { section: Section; active: boolean }) {

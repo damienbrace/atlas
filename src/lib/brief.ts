@@ -12,7 +12,7 @@ import { getSetting } from "@/lib/life/settings";
 import { briefTasks, type Task } from "@/lib/life/tasks";
 import { isBriefSection, type BriefSection } from "@/lib/brief-sections";
 import { firstPage } from "@/lib/mail/inbox";
-import { startSync, syncStatus } from "@/lib/mail/sync";
+import { MAIL_ENABLED, startSync, syncStatus } from "@/lib/mail/sync";
 import { getWeather, type Weather } from "@/lib/weather";
 import { getHermesBrief, type HermesBrief } from "@/lib/hermes";
 
@@ -73,8 +73,8 @@ export async function buildBrief(session: { email: string; refreshToken: string;
   const [weather, calendar, inbox, sync, { habits, done }, entries, tasks, hidden, hermes] = await Promise.all([
     getWeather(),
     session ? todaysEvents(session.refreshToken, session.scopes, today) : Promise.resolve({ status: "not-connected" as const, events: [] }),
-    session ? firstPage() : Promise.resolve(null),
-    session ? syncStatus() : Promise.resolve(null),
+    session && MAIL_ENABLED ? firstPage() : Promise.resolve(null),
+    session && MAIL_ENABLED ? syncStatus() : Promise.resolve(null),
     habitsData(today),
     listEntries(),
     briefTasks(today, todayStart),
@@ -95,7 +95,7 @@ export async function buildBrief(session: { email: string; refreshToken: string;
     today,
     weather,
     calendar,
-    gmailConnected: Boolean(session),
+    gmailConnected: Boolean(session) && MAIL_ENABLED,
     replies,
     waiting,
     stillSorting: (sync?.sortingLeft ?? 0) > 0,

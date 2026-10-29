@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Atlas",
     short_name: "Atlas",
-    description: "Personal AI assistant: email, calendar, journal, habits and notes.",
+    description: "Personal AI assistant: tasks, calendar, journal and habits.",
     start_url: "/brief",
     scope: "/",
     display: "standalone",

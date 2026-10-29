@@ -30,6 +30,12 @@ import {
 // Each run stops at a time budget (servers cut long requests off) and the next run
 // carries on where it left off: opening Atlas starts a short run, the scheduled job a long one.
 
+/**
+ * Atlas's own email handling is switched off: Hermes reads and sorts Damien's email now.
+ * Set back to true to have Atlas download and AI-sort Gmail again.
+ */
+export const MAIL_ENABLED = false;
+
 export const WINDOW_DAYS = 365;
 export const SORT_DAYS = 14;
 const DAY_MS = 86_400_000;
@@ -87,11 +93,13 @@ export async function syncStatus(): Promise<SyncStatus> {
 
 /** Starts a short sync after this response unless one is running or ran moments ago. */
 export function startSync(account: string, refreshToken: string) {
+  if (!MAIL_ENABLED) return;
   after(() => syncMail(account, refreshToken, PAGE_RUN_MS));
 }
 
 /** Syncs for up to `budgetMs`, unless another run holds the lock or a light check-in isn't due yet. */
 export async function syncMail(account: string, refreshToken: string, budgetMs: number) {
+  if (!MAIL_ENABLED) return;
   if ((await getState("account")) !== account) {
     // A different Gmail account: start its store from scratch.
     await clearMail();
@@ -272,6 +280,7 @@ async function saveRound(round: ParsedThread[], results: Awaited<ReturnType<type
  * the suggestions start full. Only threads sorted into `categories` (e.g. action, receipts).
  */
 export async function lookBackForTasks(categories: string[], budgetMs: number) {
+  if (!MAIL_ENABLED) return { candidates: 0, looked: 0, suggested: 0 };
   const deadline = Date.now() + budgetMs;
   const recent = await listThreads({ since: Date.now() - SORT_DAYS * DAY_MS, limit: 2000, bodyChars: 12_000 });
   const { triage } = await annotationsFor(recent.map(triageKey), []);

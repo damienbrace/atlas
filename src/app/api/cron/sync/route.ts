@@ -1,7 +1,7 @@
 import { after } from "next/server";
 import { getGoogleAccount } from "@/lib/auth/account";
 import { isCronRequest } from "@/lib/cron";
-import { syncMail } from "@/lib/mail/sync";
+import { MAIL_ENABLED, syncMail } from "@/lib/mail/sync";
 
 // Supabase cron calls this every few minutes so mail keeps downloading and getting
 // sorted while every browser is closed. It answers straight away and does the work
@@ -13,6 +13,7 @@ const RUN_MS = 240_000;
 
 export async function POST(request: Request) {
   if (!isCronRequest(request)) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (!MAIL_ENABLED) return Response.json({ ok: true, skipped: "Email is handled by Hermes" });
   const account = await getGoogleAccount();
   if (!account) return Response.json({ ok: false, reason: "Google isn't connected" });
   after(() => syncMail(account.email, account.refreshToken, RUN_MS));

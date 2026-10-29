@@ -84,9 +84,9 @@ export function Brief({ data, pushKey }: { data: BriefData; pushKey: string }) {
               )}
             </Card>
 
-            <Card id="needs" title="Needs you" icon={<Mail className="size-5 text-muted" strokeWidth={1.75} />} href="/inbox">
-              <Replies data={data} />
-              <h3 className="mt-5 mb-1 px-2 text-[12.5px] font-semibold tracking-wide text-faint uppercase">Tasks</h3>
+            <Card id="needs" title="Needs you" icon={<Mail className="size-5 text-muted" strokeWidth={1.75} />} href="/tasks">
+              {data.gmailConnected && <Replies data={data} />}
+              <h3 className={`${data.gmailConnected ? "mt-5 " : ""}mb-1 px-2 text-[12.5px] font-semibold tracking-wide text-faint uppercase`}>Tasks</h3>
               <BriefTasks tasks={data.tasks} today={data.today} />
             </Card>
 

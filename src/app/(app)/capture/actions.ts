@@ -6,7 +6,7 @@ import { aiConfigured } from "@/lib/env";
 import { isDayKey, longDay } from "@/lib/life/days";
 import { listHabits, setDone } from "@/lib/life/habits";
 import { appendToEntry } from "@/lib/life/journal";
-import { createNote, NOTE_TAGS, type NoteTag } from "@/lib/life/notes";
+import { NOTE_TAGS, type NoteTag } from "@/lib/life/notes";
 import { isTaskArea } from "@/lib/life/task-rules";
 import { addTask } from "@/lib/life/tasks";
 
@@ -83,8 +83,9 @@ export async function saveCaptureItem(item: CaptureSuggestion, today: string) {
       });
       return { ok: true as const };
     case "note":
+      // The Notes page is gone (notes live in Obsidian now), so keep the info in today's journal.
       if (!title && !body) return { ok: false as const };
-      await createNote(title, body, cleanTag(item.tag));
+      await appendToEntry(today, [title && `Note: ${title}`, body].filter(Boolean).join(" — "));
       return { ok: true as const };
     case "journal":
       if (!body && !title) return { ok: false as const };

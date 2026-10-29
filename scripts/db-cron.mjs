@@ -28,7 +28,6 @@ const call = (path) => `
 
 // pg_cron runs on UTC. Perth is UTC+8 all year (no daylight saving): 21:00 UTC is 5:00am, 09:00 UTC is 5:00pm.
 const JOBS = [
-  { name: "atlas-sync", schedule: "*/5 * * * *", command: call("/api/cron/sync") },
   { name: "atlas-money", schedule: "45 20 * * *", command: call("/api/cron/money") },
   { name: "atlas-nudge", schedule: "0 9 * * *", command: call("/api/cron/nudge") },
 ];
@@ -38,6 +37,8 @@ try {
   await sql`create extension if not exists pg_net with schema extensions`;
   // The 5am brief push was retired (Hermes sends the morning brief); remove its job if it's still there.
   await sql`select cron.unschedule(jobname) from cron.job where jobname = 'atlas-brief'`;
+  // Email sorting was retired too (Hermes handles email); remove the 5-minute mail sync.
+  await sql`select cron.unschedule(jobname) from cron.job where jobname = 'atlas-sync'`;
   for (const job of JOBS) {
     // Same name replaces the old job, so re-running just updates the address.
     await sql`select cron.schedule(${job.name}, ${job.schedule}, ${job.command})`;
