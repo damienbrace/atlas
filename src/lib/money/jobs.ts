@@ -194,13 +194,18 @@ export async function disconnectUp() {
   await setUpConnection(null);
 }
 
-/** The early-morning job: catch up with Up, sort what's new, then check it. */
-export async function morningMoney(budgetMs: number) {
-  // Sorting and checking still run if Up can't be reached; the page shows why.
-  if (await getUpConnection()) await syncUp(budgetMs).catch((error) => console.error("Up sync failed", error));
+/** After new transactions arrive: sort the merchants Atlas hasn't read, then check what's new. */
+export async function sortAndCheck() {
   for (let round = 0; round < 10; round++) {
     const { remaining, sorted } = await sortRound();
     if (remaining === 0 || sorted === 0) break;
   }
-  await review("new");
+  return review("new");
+}
+
+/** The early-morning job: catch up with Up, sort what's new, then check it. */
+export async function morningMoney(budgetMs: number) {
+  // Sorting and checking still run if Up can't be reached; the page shows why.
+  if (await getUpConnection()) await syncUp(budgetMs).catch((error) => console.error("Up sync failed", error));
+  await sortAndCheck();
 }

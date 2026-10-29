@@ -1,6 +1,7 @@
 "use server";
 
 import { describeAiError, interpretMoneyInstruction, interpretMoneyQuestion, sortMerchants, type MoneyQuestionResult } from "@/lib/ai/claude";
+import { after } from "next/server";
 import { signedIn } from "@/lib/auth/session";
 import { dayKey, isDayKey } from "@/lib/life/days";
 import type { CsvRow } from "@/lib/money/csv";
@@ -27,7 +28,7 @@ import {
   transactionAmounts,
   transactionSpan,
 } from "@/lib/money/db";
-import { connectUp as connect, disconnectUp as disconnect, review, sortRound, syncUp, UpNotConnected } from "@/lib/money/jobs";
+import { connectUp as connect, disconnectUp as disconnect, review, sortAndCheck, sortRound, syncUp, UpNotConnected } from "@/lib/money/jobs";
 import { cleanDescription, normalise, titleCase } from "@/lib/money/merchant";
 import type { MoneyQuery } from "@/lib/money/question";
 import { UpError } from "@/lib/money/up";
@@ -396,6 +397,8 @@ export async function connectUp(
   if (!UP_TOKEN.test(clean)) return { ok: false, error: "That doesn't look like an Up token. It starts with up:yeah:" };
   try {
     const res = await connect(clean);
+    // Sorting new merchants and checking what came in can take a while, so it runs after answering.
+    after(() => sortAndCheck().catch((error) => console.error("Sort and check after connecting Up", error)));
     return { ok: true, live: res.live, added: res.added, linked: res.linked, done: res.done };
   } catch (error) {
     return { ok: false, error: upProblem(error) };
@@ -406,6 +409,7 @@ export async function syncUpNow(): Promise<{ ok: true; added: number; done: bool
   if (!(await signedIn())) return { ok: false, error: "Sign in again." };
   try {
     const res = await syncUp(40_000);
+    if (res.added) after(() => sortAndCheck().catch((error) => console.error("Sort and check after syncing Up", error)));
     return { ok: true, added: res.added, done: res.done };
   } catch (error) {
     return { ok: false, error: upProblem(error) };
