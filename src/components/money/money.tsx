@@ -1,8 +1,8 @@
 "use client";
 
-import { FileUp } from "lucide-react";
+import { FileUp, Undo2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type FormEvent } from "react";
 import {
   approveRules,
   categorise,
@@ -10,15 +10,19 @@ import {
   fixFlag,
   leaveAlone,
   removeRule,
+  reopenCheck,
   resortMerchants,
+  restoreMerchants,
+  restoreSorting,
   reviewWithAtlas,
   splitTransactions,
+  type SortingSnapshot,
 } from "@/app/(app)/money/actions";
 import { Dialog } from "@/components/dialog";
 import { useToast } from "@/components/toast";
 import { addDays, dayKey, parseDay, shortDay } from "@/lib/life/days";
 import { findIssues, ruleMatches, safePattern, type Issue } from "@/lib/money/checks";
-import { merchantName } from "@/lib/money/merchant";
+import { merchantName, titleCase } from "@/lib/money/merchant";
 import {
   inRange,
   monthlySpending,
@@ -51,6 +55,21 @@ import { UploadDialog } from "./upload-dialog";
 
 /** What my own picks change on a transaction, shown before the server has it. */
 type Patch = Pick<Transaction, "category" | "sortedBy" | "splits">;
+
+/** A change the Undo button can take back. */
+interface Undo {
+  id: number;
+  /** What the change was: "Coffee Joy → Groceries". */
+  label: string;
+  run: () => Promise<boolean>;
+}
+
+/** Changes Undo remembers, newest last. */
+const MAX_UNDO = 30;
+
+/** Ctrl+Z belongs to a text box while you're typing in it (a dropdown has no undo of its own, so it's Atlas's). */
+const typing = (target: EventTarget | null) =>
+  target instanceof HTMLElement && (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA");
 
 interface MoneyProps {
   transactions: Transaction[];
@@ -97,10 +116,14 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
 
   // My category picks and splits show straight away; the server's copy replaces them on refresh.
   const [picks, setPicks] = useState<Record<string, Patch>>({});
+  // Things to check being fixed hide straight away.
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [seen, setSeen] = useState(fromServer);
   if (seen !== fromServer) {
     setSeen(fromServer);
     setPicks({});
+    // Fixed things to check have gone from the server's data; an undone fix comes back.
+    setHidden(new Set());
   }
   const transactions = useMemo(
     () =>
@@ -120,10 +143,14 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
   const [uploading, setUploading] = useState(false);
   const [naming, setNaming] = useState<Transaction | null>(null);
   const [splitting, setSplitting] = useState<Transaction | null>(null);
-  // Things to check: what I've left or am fixing hides straight away.
+  // Things to check I've left hide straight away.
   const [left, setLeft] = useState(() => new Set(leftChecks));
-  const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [reviewing, setReviewing] = useState<"new" | "all" | null>(null);
+  // Undo: the ref is what's true right now (two quick Ctrl+Zs mustn't take back the same
+  // change twice); the state is what the button shows.
+  const undoStack = useRef<Undo[]>([]);
+  const [undos, setUndos] = useState<Undo[]>([]);
+  const undoId = useRef(0);
 
   const accounts = [...new Set([...uploads.map((u) => u.account), ...transactions.map((t) => t.account)])];
   const mine = useMemo(() => (account ? transactions.filter((t) => t.account === account) : transactions), [transactions, account]);
@@ -169,13 +196,75 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
       return rest;
     });
 
+  // ---- Undo ----
+
+  function remember(label: string, run: () => Promise<boolean>) {
+    const id = ++undoId.current;
+    undoStack.current = [...undoStack.current, { id, label, run }].slice(-MAX_UNDO);
+    setUndos(undoStack.current);
+    return id;
+  }
+
+  /** Takes back the last change, or a particular one (a toast's Undo). */
+  async function undo(id?: number) {
+    const entry = id === undefined ? undoStack.current.at(-1) : undoStack.current.find((u) => u.id === id);
+    if (!entry) return;
+    undoStack.current = undoStack.current.filter((u) => u.id !== entry.id);
+    setUndos(undoStack.current);
+    const ok = await entry.run().catch(() => false);
+    toast({ message: ok ? `Undone: ${entry.label}` : "Couldn't undo that" });
+    refresh();
+  }
+
+  const latestUndo = useRef(undo);
+  useEffect(() => {
+    latestUndo.current = undo;
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "z" || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || typing(e.target)) return;
+      e.preventDefault();
+      void latestUndo.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  /** How these transactions are sorted now, to put back later. */
+  const snapshot = (ids: string[]): SortingSnapshot[] => {
+    const wanted = new Set(ids);
+    return transactions.filter((t) => wanted.has(t.id)).map((t) => ({ id: t.id, category: t.category, sortedBy: t.sortedBy, splits: t.splits ?? null }));
+  };
+
+  /** Puts transactions back as a snapshot had them, on screen straight away. */
+  async function restore(snaps: SortingSnapshot[]) {
+    if (snaps.length === 0) return true;
+    setPicks((p) => ({
+      ...p,
+      ...Object.fromEntries(snaps.map((s) => [s.id, { category: s.category, sortedBy: s.sortedBy as Transaction["sortedBy"], splits: s.splits }])),
+    }));
+    const res = await restoreSorting(snaps).catch(() => ({ ok: false as const }));
+    if (!res.ok) unpick(snaps.map((s) => s.id));
+    return res.ok;
+  }
+
+  /** Atlas's current read of these merchants, to put back later (null if it hasn't read one). */
+  const merchantReads = (keys: string[]) => {
+    const reads = keys.map((key) => transactions.find((t) => t.merchantKey === key));
+    return reads.every((t) => t?.merchant && t.atlasCategory)
+      ? reads.map((t) => ({ key: t!.merchantKey, name: t!.merchant!, category: t!.atlasCategory! }))
+      : null;
+  };
+
   async function pickCategory(t: Transaction, category: string | null) {
+    const before = snapshot([t.id]);
     setPicks((p) => ({ ...p, [t.id]: { category, sortedBy: category === null ? null : "me", splits: null } }));
     const res = await categorise([t.id], category).catch(() => ({ ok: false as const }));
     if (!res.ok) {
       unpick([t.id]);
       return toast({ message: "Couldn't change that category" });
     }
+    remember(`${merchantName(t)} → ${category ?? (t.splits ? "not split" : "Atlas's pick")}`, () => restore(before));
     if (category === null) return refresh();
     // A rule for the rest, worded so it can't sweep up payments that were for other things.
     const pattern = safePattern(t, category, transactions);
@@ -192,6 +281,7 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
 
   /** My pick for many payments at once; undo hands them back to rules and Atlas. */
   async function pickMany(ids: string[], category: string) {
+    const before = snapshot(ids);
     setPicks((p) => ({ ...p, ...Object.fromEntries(ids.map((id) => [id, { category, sortedBy: "me" as const, splits: null }])) }));
     const res = await categorise(ids, category).catch(() => ({ ok: false as const }));
     if (!res.ok) {
@@ -199,10 +289,8 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
       toast({ message: "Couldn't move those" });
       return false;
     }
-    toast({
-      message: `Moved ${ids.length} to ${category}`,
-      onAction: () => void categorise(ids, null).then(refresh),
-    });
+    const id = remember(`moving ${ids.length} to ${category}`, () => restore(before));
+    toast({ message: `Moved ${ids.length} to ${category}`, onAction: () => void undo(id) });
     return true;
   }
 
@@ -224,9 +312,11 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
       const rule = rules.find((r) => r.id === fix.ruleId);
       if (rule) await deleteRule(rule);
     } else if (fix.type === "reread") {
+      const reads = merchantReads(fix.keys);
       const res = await resortMerchants(fix.keys).catch(() => ({ ok: false as const, error: "Couldn't reach Atlas. Try again." }));
       ok = res.ok;
       toast({ message: res.ok ? "Atlas sorted it again" : res.error });
+      if (res.ok && reads) remember("Atlas sorting it again", () => restoreMerchants(reads).then((r) => r.ok));
       if (res.ok) refresh();
     } else if (fix.type === "rule") {
       ok = await saveRules([{ pattern: fix.pattern, category: fix.category, amountCents: null }], []);
@@ -237,28 +327,48 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
   }
 
   async function fixAtlasFlag(flag: MoneyFlag) {
-    hide(`flag:${flag.id}`);
+    const key = `flag:${flag.id}`;
+    const ids = transactions.filter((t) => t.merchantKey === flag.merchantKey && t.category === flag.currentCategory).map((t) => t.id);
+    const before = snapshot(ids);
+    const reads = merchantReads([flag.merchantKey]);
+    hide(key);
     const res = await fixFlag(flag.id).catch(() => ({ ok: false as const }));
     if (!res.ok) {
-      unhide(`flag:${flag.id}`);
+      unhide(key);
       return toast({ message: "Couldn't move those" });
     }
-    toast({ message: `Moved to ${flag.category}` });
+    const id = remember(`moving to ${flag.category}`, async () => {
+      if (reads && !(await restoreMerchants(reads)).ok) return false;
+      const ok = (await restore(before)) && (await reopenCheck(key)).ok;
+      if (ok) unhide(key);
+      return ok;
+    });
+    toast({ message: `Moved to ${flag.category}`, onAction: () => void undo(id) });
     refresh();
   }
 
-  async function leave(id: string) {
-    if (id.startsWith("flag:")) hide(id);
-    else setLeft((l) => new Set(l).add(id));
-    const res = await leaveAlone(id).catch(() => ({ ok: false as const }));
-    if (res.ok) return;
+  const unleave = (id: string) => {
     unhide(id);
     setLeft((l) => {
       const rest = new Set(l);
       rest.delete(id);
       return rest;
     });
-    toast({ message: "Couldn't save that" });
+  };
+
+  async function leave(id: string) {
+    if (id.startsWith("flag:")) hide(id);
+    else setLeft((l) => new Set(l).add(id));
+    const res = await leaveAlone(id).catch(() => ({ ok: false as const }));
+    if (!res.ok) {
+      unleave(id);
+      return toast({ message: "Couldn't save that" });
+    }
+    remember("leaving a thing to check", async () => {
+      const ok = (await reopenCheck(id)).ok;
+      if (ok) unleave(id);
+      return ok;
+    });
   }
 
   /** Atlas reviews the sorting: just what's new (after an upload) or everything. */
@@ -284,7 +394,9 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
   async function split(t: Transaction, parts: SplitPart[] | null) {
     setSplitting(null);
     if (parts === null) return pickCategory(t, null);
+    const before = snapshot([t.id]);
     if (!(await saveSplits([{ t, parts }]))) return toast({ message: "Couldn't split that payment" });
+    remember(`splitting ${merchantName(t)}`, () => restore(before));
     // The same payment again ("Mum · Money owed" three times) can be split the same way.
     const others = transactions.filter(
       (o) => o.id !== t.id && o.merchantKey === t.merchantKey && o.sortedBy !== "bank" && Math.sign(o.amountCents) === Math.sign(t.amountCents),
@@ -298,8 +410,10 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
         // A payment too small to split into whole cents is left as it is.
         const items = others.map((o) => ({ t: o, parts: splitByShares(o.amountCents, shares) })).filter((i) => i.parts.every((p) => p.cents !== 0));
         if (items.length === 0) return;
-        if (await saveSplits(items)) toast({ message: `Split ${items.length + 1} payments` });
-        else toast({ message: "Couldn't split those payments" });
+        const before = snapshot(items.map((i) => i.t.id));
+        if (!(await saveSplits(items))) return toast({ message: "Couldn't split those payments" });
+        const id = remember(`splitting ${items.length} more the same way`, () => restore(before));
+        toast({ message: `Split ${items.length + 1} payments`, onAction: () => void undo(id) });
       },
     });
   }
@@ -311,7 +425,12 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
       return false;
     }
     const sorted = new Set(drafts.flatMap((r) => ruleMatches(r, transactions).filter((t) => !isFixed(t.sortedBy)).map((t) => t.id))).size;
-    toast({ message: sorted ? `Sorted ${sorted} transaction${sorted === 1 ? "" : "s"}` : "Rule saved" });
+    const label = res.rules.length === 1 ? `the rule ${titleCase(res.rules[0].pattern)} → ${res.rules[0].category}` : `${res.rules.length} rules`;
+    const id = remember(label, async () => {
+      for (const r of res.rules) if (!(await removeRule(r.id)).ok) return false;
+      return true;
+    });
+    toast({ message: sorted ? `Sorted ${sorted} transaction${sorted === 1 ? "" : "s"}` : "Rule saved", onAction: () => void undo(id) });
     refresh();
     return true;
   }
@@ -319,7 +438,8 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
   async function deleteRule(rule: Rule) {
     const res = await removeRule(rule.id).catch(() => ({ ok: false as const }));
     if (!res.ok) return toast({ message: "Couldn't delete that rule" });
-    toast({ message: "Rule deleted", onAction: () => void saveRules([rule], []) });
+    const id = remember(`deleting the rule ${titleCase(rule.pattern)}`, async () => (await approveRules([rule], []).catch(() => ({ ok: false as const }))).ok);
+    toast({ message: "Rule deleted", onAction: () => void undo(id) });
     refresh();
   }
 
@@ -415,6 +535,17 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            {undos.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void undo()}
+                title={`Undo ${undos.at(-1)!.label} (Ctrl+Z)`}
+                className="flex h-10 max-w-full items-center gap-2 rounded-xl border border-line-strong px-4 text-[14.5px] font-medium hover:border-faint hover:bg-white/[0.03]"
+              >
+                <Undo2 className="size-[18px] shrink-0" strokeWidth={1.75} /> Undo
+                <span className="hidden max-w-[14rem] truncate font-normal text-muted lg:inline">{undos.at(-1)!.label}</span>
+              </button>
+            )}
             <UpConnect status={up} today={today} onChanged={refresh} />
             <button
               type="button"

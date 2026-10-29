@@ -20,6 +20,7 @@ import {
   merchantSummary,
   paymentsIn,
   resort,
+  restoreRows,
   saveMerchants,
   setCategory,
   setFlagStatus,
@@ -27,6 +28,7 @@ import {
   startUpload,
   transactionAmounts,
   transactionSpan,
+  unleaveCheck,
 } from "@/lib/money/db";
 import { connectUp as connect, disconnectUp as disconnect, review, sortAndCheck, sortRound, syncUp, UpNotConnected } from "@/lib/money/jobs";
 import { cleanDescription, normalise, titleCase } from "@/lib/money/merchant";
@@ -420,5 +422,69 @@ export async function syncUpNow(): Promise<{ ok: true; added: number; done: bool
 export async function disconnectUp() {
   if (!(await signedIn())) return { ok: false as const };
   await disconnect();
+  return { ok: true as const };
+}
+
+// ---- Undo ---------------------------------------------------------------------------------
+
+/** How a transaction was sorted before a change. */
+export interface SortingSnapshot {
+  id: string;
+  category: string | null;
+  sortedBy: string | null;
+  splits: SplitPart[] | null;
+}
+
+function validSplits(splits: unknown, amount: number | undefined, categories: string[]): splits is SplitPart[] {
+  if (!Array.isArray(splits) || amount === undefined || splits.length < 2 || splits.length > MAX_SPLITS) return false;
+  const ok = splits.every(
+    (p) => categories.includes(p?.category) && Number.isSafeInteger(p?.cents) && p.cents !== 0 && Math.sign(p.cents) === Math.sign(amount),
+  );
+  return ok && splits.reduce((sum: number, p: SplitPart) => sum + p.cents, 0) === amount;
+}
+
+/**
+ * Undo: puts transactions back how they were sorted. My picks and the bank's transfers go
+ * back exactly; anything rules or Atlas decided is handed back to them, so it follows
+ * whatever they say now.
+ */
+export async function restoreSorting(items: SortingSnapshot[]) {
+  if (!(await signedIn())) return { ok: false as const };
+  if (!Array.isArray(items) || items.length === 0 || items.length > 5000 || !items.every((i) => isTransactionId(i?.id))) return { ok: false as const };
+  const [categories, amounts] = await Promise.all([getCategories(), transactionAmounts(items.map((i) => i.id))]);
+  const amountOf = new Map(amounts.map((a) => [a.id, a.amount_cents]));
+  const rows = items.map((s) => {
+    const fixed = (s.sortedBy === "me" || s.sortedBy === "bank") && typeof s.category === "string" && categories.includes(s.category);
+    if (!fixed) return { id: s.id, category: null, sorted_by: null, splits: null };
+    const splits = validSplits(s.splits, amountOf.get(s.id), categories) ? s.splits!.map((p) => ({ category: p.category, cents: p.cents })) : null;
+    return { id: s.id, category: s.category, sorted_by: s.sortedBy, splits };
+  });
+  await restoreRows(rows);
+  return { ok: true as const };
+}
+
+/** Undo: puts Atlas's read of merchants back. */
+export async function restoreMerchants(items: { key: string; name: string; category: string }[]) {
+  if (!(await signedIn())) return { ok: false as const };
+  if (!Array.isArray(items) || items.length === 0 || items.length > 50) return { ok: false as const };
+  const categories = await getCategories();
+  const clean = [];
+  for (const m of items) {
+    const name = cleanText(m?.name, 60);
+    if (typeof m?.key !== "string" || m.key.length === 0 || m.key.length > 80 || !name || !categories.includes(m.category)) return { ok: false as const };
+    clean.push({ key: m.key, name, category: m.category });
+  }
+  await saveMerchants(clean);
+  return { ok: true as const };
+}
+
+/** Undo for a fix or a "Leave it": the thing to check comes back. */
+export async function reopenCheck(id: string) {
+  if (!(await signedIn())) return { ok: false as const };
+  if (typeof id !== "string" || id.length === 0 || id.length > 300) return { ok: false as const };
+  if (id.startsWith("flag:")) {
+    if (!isId(id.slice(5))) return { ok: false as const };
+    await setFlagStatus(id.slice(5), "open");
+  } else await unleaveCheck(id);
   return { ok: true as const };
 }

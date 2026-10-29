@@ -330,7 +330,7 @@ export async function getFlag(id: string) {
   return row ?? null;
 }
 
-export async function setFlagStatus(id: string, status: "fixed" | "left") {
+export async function setFlagStatus(id: string, status: "open" | "fixed" | "left") {
   await sql`UPDATE money_flags SET status = ${status} WHERE id = ${id}`;
 }
 
@@ -458,4 +458,22 @@ export async function deleteUpRows(upIds: string[]) {
 export async function staleHeld(fromDay: string, seen: Set<string>) {
   const rows = await sql<{ up_id: string }[]>`SELECT up_id FROM money_transactions WHERE status = 'HELD' AND up_id IS NOT NULL AND day >= ${fromDay}`;
   return rows.map((r) => r.up_id).filter((id) => !seen.has(id));
+}
+
+// ---- Undo -----------------------------------------------------------------------------------
+
+/** Takes back a "Leave it". */
+export async function unleaveCheck(id: string) {
+  const left = await getLeftChecks();
+  if (left.includes(id)) await setSetting(LEFT_KEY, left.filter((l) => l !== id));
+}
+
+/** Puts transactions' sorting back as given, then re-sorts whatever's left to rules and Atlas. */
+export async function restoreRows(items: { id: string; category: string | null; sorted_by: string | null; splits: { category: string; cents: number }[] | null }[]) {
+  if (items.length === 0) return;
+  await sql`
+    UPDATE money_transactions t SET category = d.category, sorted_by = d.sorted_by, splits = d.splits
+    FROM jsonb_to_recordset(${sql.json(items)}) AS d(id text, category text, sorted_by text, splits jsonb)
+    WHERE t.id = d.id`;
+  await resort();
 }
