@@ -23,6 +23,7 @@ import {
   restoreRows,
   saveMerchants,
   setCategory,
+  setExcluded,
   setFlagStatus,
   setSplits,
   startUpload,
@@ -154,6 +155,14 @@ export async function splitTransactions(items: { id: string; parts: SplitPart[] 
     clean.push({ id, category: biggest.category, splits });
   }
   await setSplits(clean);
+  return { ok: true as const };
+}
+
+/** Leaves transactions out of every total (still listed), or counts them again. */
+export async function excludeFromTotals(ids: string[], excluded: boolean) {
+  if (!(await signedIn())) return { ok: false as const };
+  if (!Array.isArray(ids) || ids.length === 0 || ids.length > 5000 || !ids.every(isTransactionId) || typeof excluded !== "boolean") return { ok: false as const };
+  await setExcluded(ids, excluded);
   return { ok: true as const };
 }
 

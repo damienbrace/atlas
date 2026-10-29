@@ -7,6 +7,7 @@ import {
   approveRules,
   categorise,
   createCategory,
+  excludeFromTotals,
   fixFlag,
   leaveAlone,
   removeRule,
@@ -38,7 +39,7 @@ import {
 import type { Span } from "@/lib/money/question";
 import { findRecurring } from "@/lib/money/recurring";
 import { expandSplits, splitByShares } from "@/lib/money/split";
-import { isFixed, MAX_CATEGORY, type MoneyFlag, type Rule, type SplitPart, type Transaction, type Upload } from "@/lib/money/types";
+import { isFixed, MAX_CATEGORY, money, type MoneyFlag, type Rule, type SplitPart, type Transaction, type Upload } from "@/lib/money/types";
 import { AskAboutMoney } from "./ask-about-money";
 import { AskAtlas } from "./ask-atlas";
 import { ThingsToCheck, type FlagItem } from "./checks";
@@ -116,21 +117,24 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
 
   // My category picks and splits show straight away; the server's copy replaces them on refresh.
   const [picks, setPicks] = useState<Record<string, Patch>>({});
+  // So do the ones I leave out of the totals (or count again).
+  const [leftOut, setLeftOut] = useState<Record<string, boolean>>({});
   // Things to check being fixed hide straight away.
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [seen, setSeen] = useState(fromServer);
   if (seen !== fromServer) {
     setSeen(fromServer);
     setPicks({});
+    setLeftOut({});
     // Fixed things to check have gone from the server's data; an undone fix comes back.
     setHidden(new Set());
   }
   const transactions = useMemo(
     () =>
-      Object.keys(picks).length === 0
+      Object.keys(picks).length === 0 && Object.keys(leftOut).length === 0
         ? fromServer
-        : fromServer.map((t) => (t.id in picks ? { ...t, ...picks[t.id] } : t)),
-    [fromServer, picks],
+        : fromServer.map((t) => (t.id in picks || t.id in leftOut ? { ...t, ...picks[t.id], ...(t.id in leftOut ? { excluded: leftOut[t.id] } : {}) } : t)),
+    [fromServer, picks, leftOut],
   );
   const [addedCategories, setAddedCategories] = useState<string[]>([]);
   const categories = [...savedCategories, ...addedCategories.filter((c) => !savedCategories.includes(c))];
@@ -157,8 +161,10 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
   const range = periodRange(period, today, custom);
   const inPeriod = mine.filter((t) => inRange(t.day, range));
   // Split payments as their parts, for everything that adds up by category.
-  const allParts = useMemo(() => expandSplits(transactions), [transactions]);
-  const parts = useMemo(() => expandSplits(mine), [mine]);
+  // Everything that adds up leaves out what I've left out of the totals; the list still shows it.
+  const counted = useMemo(() => mine.filter((t) => !t.excluded), [mine]);
+  const allParts = useMemo(() => expandSplits(transactions.filter((t) => !t.excluded)), [transactions]);
+  const parts = useMemo(() => expandSplits(counted), [counted]);
   const summary = summarise(parts.filter((t) => inRange(t.day, range)));
   // Only compare with a span the transactions fully cover; one reaching back before the
   // first transaction would make any period look like a huge rise.
@@ -166,7 +172,7 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
   const before = previousRange(period, today, custom);
   const previous = before?.range.from && before.range.from >= earliest ? before : null;
   const earlier = previous ? parts.filter((t) => inRange(t.day, previous.range)) : [];
-  const recurring = useMemo(() => findRecurring(mine, today), [mine, today]);
+  const recurring = useMemo(() => findRecurring(counted, today), [counted, today]);
 
   const issues = useMemo(
     () => findIssues(transactions, rules, savedCategories, ownerName, left).filter((i) => !hidden.has(i.id)),
@@ -380,6 +386,23 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
     if (res.flagged) toast({ message: `Atlas found ${res.flagged} thing${res.flagged === 1 ? "" : "s"} to check` });
     else if (scope === "all") toast({ message: "Atlas checked everything: nothing looks off" });
     refresh();
+  }
+
+  /** Leaves a transaction out of every total (it stays in the list), or counts it again. */
+  async function toggleCounted(t: Transaction) {
+    const excluded = !t.excluded;
+    setLeftOut((l) => ({ ...l, [t.id]: excluded }));
+    const res = await excludeFromTotals([t.id], excluded).catch(() => ({ ok: false as const }));
+    if (!res.ok) {
+      setLeftOut((l) => ({ ...l, [t.id]: !excluded }));
+      return toast({ message: "Couldn't change that" });
+    }
+    const label = `${merchantName(t)} ${excluded ? "left out of totals" : "counted again"}`;
+    const id = remember(label, async () => {
+      setLeftOut((l) => ({ ...l, [t.id]: !excluded }));
+      return (await excludeFromTotals([t.id], !excluded).catch(() => ({ ok: false as const }))).ok;
+    });
+    toast({ message: excluded ? `Left out of totals: ${money(Math.abs(t.amountCents))}` : "Counted in totals again", onAction: () => void undo(id) });
   }
 
   /** Saves splits; each payment's parts must add up to it. */
@@ -649,6 +672,7 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
                 onCategorise={(t, c) => void pickCategory(t, c)}
                 onNewCategory={setNaming}
                 onSplit={setSplitting}
+                onExclude={(t) => void toggleCounted(t)}
               />
             </div>
           </div>

@@ -20,6 +20,8 @@ export interface Transaction {
   splitOf?: string;
   /** Atlas's own read of the merchant, even when a rule or I decided otherwise. */
   atlasCategory?: string | null;
+  /** I've left it out of the totals (a one-off like a shed deposit): still listed, never counted. */
+  excluded?: boolean;
 }
 
 /** A group of payments Atlas's review thinks is in the wrong category. */

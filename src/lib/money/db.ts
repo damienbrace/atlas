@@ -24,6 +24,7 @@ interface TransactionRow {
   sorted_by: string | null;
   splits: SplitPart[] | null;
   atlas_category: string | null;
+  excluded: boolean;
 }
 
 const isSortedBy = (v: string | null): v is SortedBy => v === "atlas" || v === "rule" || v === "me" || v === "bank";
@@ -40,6 +41,7 @@ const toTransaction = (r: TransactionRow): Transaction => ({
   sortedBy: isSortedBy(r.sorted_by) ? r.sorted_by : null,
   splits: r.splits,
   atlasCategory: r.atlas_category,
+  excluded: r.excluded,
 });
 
 /** Plenty for years of personal spending; the page filters it in the browser. */
@@ -47,7 +49,8 @@ const MAX_LOADED = 25_000;
 
 export async function listTransactions() {
   const rows = await sql<TransactionRow[]>`
-    SELECT t.id, t.account, t.day, t.amount_cents, t.description, t.merchant_key, m.name AS merchant, t.category, t.sorted_by, t.splits, m.category AS atlas_category
+    SELECT t.id, t.account, t.day, t.amount_cents, t.description, t.merchant_key, m.name AS merchant, t.category, t.sorted_by, t.splits, m.category AS atlas_category,
+      t.excluded
     FROM money_transactions t LEFT JOIN money_merchants m ON m.key = t.merchant_key
     ORDER BY t.day DESC, t.created_at DESC, t.id LIMIT ${MAX_LOADED}`;
   return rows.map(toTransaction);
@@ -476,4 +479,9 @@ export async function restoreRows(items: { id: string; category: string | null; 
     FROM jsonb_to_recordset(${sql.json(items)}) AS d(id text, category text, sorted_by text, splits jsonb)
     WHERE t.id = d.id`;
   await resort();
+}
+
+/** Leaves transactions out of the totals, or counts them again. */
+export async function setExcluded(ids: string[], excluded: boolean) {
+  await sql`UPDATE money_transactions SET excluded = ${excluded} WHERE id IN (SELECT jsonb_array_elements_text(${sql.json(ids)}))`;
 }

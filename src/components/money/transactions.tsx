@@ -86,9 +86,21 @@ interface TransactionListProps {
   onCategorise: (t: Transaction, category: string | null) => void;
   onNewCategory: (t: Transaction) => void;
   onSplit: (t: Transaction) => void;
+  /** Leaves a transaction out of the totals, or counts it again. */
+  onExclude: (t: Transaction) => void;
 }
 
-export function TransactionList({ transactions, filters, onFilters, categories, thisYear, onCategorise, onNewCategory, onSplit }: TransactionListProps) {
+export function TransactionList({
+  transactions,
+  filters,
+  onFilters,
+  categories,
+  thisYear,
+  onCategorise,
+  onNewCategory,
+  onSplit,
+  onExclude,
+}: TransactionListProps) {
   const [sort, setSort] = useState<Sort>("newest");
   const [shown, setShown] = useState(PAGE);
   const rows = transactions.filter(listFilter(filters)).sort(SORTERS[sort]);
@@ -96,7 +108,8 @@ export function TransactionList({ transactions, filters, onFilters, categories, 
   const suggestFrom = transactions.filter(listFilter({ ...filters, query: "", merchant: null }));
   // Filtered to a category, a split payment counts only its part in that category.
   const share = filters.category === UNSORTED ? null : filters.category;
-  const total = rows.reduce((sum, t) => sum + amountIn(t, share), 0);
+  // What I've left out of the totals is listed but not added up.
+  const total = rows.reduce((sum, t) => sum + (t.excluded ? 0 : amountIn(t, share)), 0);
   const filtered = JSON.stringify(filters) !== JSON.stringify(NO_FILTERS);
   const set = (patch: Partial<ListFilters>) => {
     onFilters({ ...filters, ...patch });
@@ -227,6 +240,7 @@ export function TransactionList({ transactions, filters, onFilters, categories, 
               onCategorise={onCategorise}
               onNewCategory={onNewCategory}
               onSplit={onSplit}
+              onExclude={onExclude}
             />
           ))}
         </ul>
@@ -244,6 +258,7 @@ export function TransactionList({ transactions, filters, onFilters, categories, 
 
 const NEW_CATEGORY = "__new";
 const SPLIT = "__split";
+const EXCLUDE = "__exclude";
 
 interface RowProps {
   t: Transaction;
@@ -254,9 +269,10 @@ interface RowProps {
   onCategorise: (t: Transaction, category: string | null) => void;
   onNewCategory: (t: Transaction) => void;
   onSplit: (t: Transaction) => void;
+  onExclude: (t: Transaction) => void;
 }
 
-function Row({ t, share, categories, thisYear, onCategorise, onNewCategory, onSplit }: RowProps) {
+function Row({ t, share, categories, thisYear, onCategorise, onNewCategory, onSplit, onExclude }: RowProps) {
   const date = t.day.startsWith(thisYear) ? shortDay(t.day) : `${shortDay(t.day)} ${t.day.slice(0, 4)}`;
   const name = merchantName(t);
   const shown = amountIn(t, share);
@@ -294,19 +310,37 @@ function Row({ t, share, categories, thisYear, onCategorise, onNewCategory, onSp
             value={t.category}
             categories={categories}
             label={`Category for ${name}`}
-            onChange={(value) => (value === NEW_CATEGORY ? onNewCategory(t) : value === SPLIT ? onSplit(t) : onCategorise(t, value))}
+            excluded={t.excluded ?? false}
+            onChange={(value) =>
+              value === NEW_CATEGORY ? onNewCategory(t) : value === SPLIT ? onSplit(t) : value === EXCLUDE ? onExclude(t) : onCategorise(t, value)
+            }
           />
         )}
       </span>
-      <span className={`text-right text-[15px] tabular-nums ${t.amountCents > 0 ? "text-green" : "text-ink"}`}>
-        {money(shown, { sign: true })}
-        {shown !== t.amountCents && <span className="block text-[11.5px] text-faint">of {money(t.amountCents, { sign: true })}</span>}
+      <span
+        title={t.excluded ? "Left out of the totals" : undefined}
+        className={`text-right text-[15px] tabular-nums ${t.excluded ? "text-faint" : t.amountCents > 0 ? "text-green" : "text-ink"}`}
+      >
+        <span className={t.excluded ? "line-through" : ""}>{money(shown, { sign: true })}</span>
+        {t.excluded ? (
+          <span className="block text-[11.5px] text-amber">not in totals</span>
+        ) : (
+          shown !== t.amountCents && <span className="block text-[11.5px] text-faint">of {money(t.amountCents, { sign: true })}</span>
+        )}
       </span>
     </li>
   );
 }
 
-function CategorySelect({ value, categories, label, onChange }: { value: string | null; categories: string[]; label: string; onChange: (v: string | null) => void }): ReactNode {
+interface CategorySelectProps {
+  value: string | null;
+  categories: string[];
+  label: string;
+  excluded: boolean;
+  onChange: (v: string | null) => void;
+}
+
+function CategorySelect({ value, categories, label, excluded, onChange }: CategorySelectProps): ReactNode {
   return (
     <select
       aria-label={label}
@@ -324,6 +358,7 @@ function CategorySelect({ value, categories, label, onChange }: { value: string 
       ))}
       <option value={NEW_CATEGORY}>New category…</option>
       <option value={SPLIT}>Split…</option>
+      <option value={EXCLUDE}>{excluded ? "Count in totals again" : "Leave out of totals"}</option>
     </select>
   );
 }

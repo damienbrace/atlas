@@ -164,6 +164,8 @@ alter table money_transactions add column if not exists splits jsonb;
 alter table money_transactions add column if not exists up_id text;
 alter table money_transactions add column if not exists status text;
 create unique index if not exists money_transactions_up on money_transactions (up_id) where up_id is not null;
+-- A one-off I've left out of the totals (a $9k shed deposit): still listed, never counted.
+alter table money_transactions add column if not exists excluded boolean not null default false;
 create index if not exists money_transactions_day on money_transactions (day);
 create index if not exists money_transactions_key on money_transactions (merchant_key);
 
