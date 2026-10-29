@@ -124,7 +124,7 @@ export function Notes({ notes: initial, tags, emailConnected, openNoteId }: Note
   const counts = Object.fromEntries(tags.map((t) => [t, notes.filter((n) => n.tag === t).length]));
 
   return (
-    <div className="flex h-full min-h-0 gap-3 p-3 pb-[84px] md:pb-3">
+    <div className="flex h-full min-h-0 gap-3 p-3 pb-[calc(var(--mobile-nav,84px)+16px)] md:pb-3">
       <section
         aria-label="Notes"
         className={`${open ? "hidden xl:flex" : "flex"} min-h-0 min-w-0 flex-1 flex-col overflow-y-auto rounded-2xl border border-line bg-panel p-5 scroll-thin md:p-6`}

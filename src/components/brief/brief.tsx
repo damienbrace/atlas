@@ -29,7 +29,7 @@ export function Brief({ data, pushKey }: { data: BriefData; pushKey: string }) {
 
   return (
     <BriefLayout initialHidden={data.hidden}>
-      <div className="h-full overflow-y-auto p-3 pb-[84px] scroll-thin md:pb-3 lg:p-5">
+      <div className="h-full overflow-y-auto p-3 pb-[calc(var(--mobile-nav,84px)+16px)] scroll-thin md:pb-3 lg:p-5">
         <div className="mx-auto flex max-w-[1400px] flex-col gap-3 lg:gap-4">
           <header className="flex flex-wrap items-end justify-between gap-3 px-1">
             <div>

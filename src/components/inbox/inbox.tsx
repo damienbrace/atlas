@@ -17,7 +17,7 @@ export function Inbox({ data, notice }: { data: InboxData; notice?: string }) {
   const detailVisibility = inbox.detailOpenOnMobile ? "flex" : "hidden md:flex";
 
   return (
-    <div className="flex h-full min-h-0 gap-3 p-3 pb-[84px] md:pb-3">
+    <div className="flex h-full min-h-0 gap-3 p-3 pb-[calc(var(--mobile-nav,84px)+16px)] md:pb-3">
       <EmailList inbox={inbox} notice={notice} className={inbox.detailOpenOnMobile ? "hidden md:flex" : "flex"} />
       <div
         className={`${detailVisibility} min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto scroll-thin xl:flex-[1.95] xl:flex-row xl:overflow-visible`}

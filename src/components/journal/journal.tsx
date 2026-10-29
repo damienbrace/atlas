@@ -83,7 +83,7 @@ export function Journal({ entries, today }: { entries: JournalEntry[]; today: st
   }
 
   return (
-    <div className="flex h-full min-h-0 gap-3 p-3 pb-[84px] md:pb-3">
+    <div className="flex h-full min-h-0 gap-3 p-3 pb-[calc(var(--mobile-nav,84px)+16px)] md:pb-3">
       <aside
         aria-label="Journal entries"
         className={`${listOpenOnMobile ? "flex" : "hidden md:flex"} min-h-0 w-full min-w-0 flex-col rounded-2xl border border-line bg-panel md:w-[300px] md:shrink-0 lg:w-[340px]`}

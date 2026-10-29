@@ -39,7 +39,7 @@ function CalendarScreen({ tasks }: { tasks: Task[] }) {
   const { editor } = cal;
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3 pb-[84px] scroll-thin md:pb-3 lg:gap-4 lg:p-5 xl:overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3 pb-[calc(var(--mobile-nav,84px)+16px)] scroll-thin md:pb-3 lg:gap-4 lg:p-5 xl:overflow-hidden">
       <Header cal={cal} />
       <Toolbar cal={cal} />
 
@@ -200,7 +200,7 @@ function Toolbar({ cal }: { cal: CalendarState }) {
 
 function CalendarSkeleton() {
   return (
-    <div aria-hidden="true" className="flex h-full min-h-0 flex-col gap-3 p-3 pb-[84px] md:pb-3 lg:gap-4 lg:p-5">
+    <div aria-hidden="true" className="flex h-full min-h-0 flex-col gap-3 p-3 pb-[calc(var(--mobile-nav,84px)+16px)] md:pb-3 lg:gap-4 lg:p-5">
       <h1 className="px-1 text-[34px] leading-none font-bold tracking-tight">Calendar</h1>
       <div className="mt-[2px] h-[74px] rounded-2xl border border-line bg-panel lg:h-[82px]" />
       <div className="flex min-h-0 flex-1 gap-4">

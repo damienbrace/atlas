@@ -493,7 +493,7 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
 
   if (transactions.length === 0) {
     return (
-      <div className="h-full overflow-y-auto p-3 pb-[84px] scroll-thin md:pb-3 lg:p-5">
+      <div className="h-full overflow-y-auto p-3 pb-[calc(var(--mobile-nav,84px)+16px)] scroll-thin md:pb-3 lg:p-5">
         <div className="mx-auto flex max-w-[640px] flex-col gap-4 pt-6 md:pt-16">
           <h1 className="px-1 text-[30px] leading-tight font-bold tracking-tight md:text-[34px]">Money</h1>
           <section className="rounded-2xl border border-line bg-panel p-6">
@@ -524,7 +524,7 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
   }
 
   return (
-    <div className="h-full overflow-y-auto p-3 pb-[84px] scroll-thin md:pb-3 lg:p-5">
+    <div className="h-full overflow-y-auto p-3 pb-[calc(var(--mobile-nav,84px)+16px)] scroll-thin md:pb-3 lg:p-5">
       <div className="mx-auto flex max-w-[1320px] flex-col gap-4">
         <header className="flex flex-wrap items-end justify-between gap-3 px-1">
           <div>

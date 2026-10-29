@@ -141,7 +141,7 @@ export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, to
   const searching = query.trim().length > 0;
 
   return (
-    <div className="h-full overflow-y-auto p-3 pb-[84px] scroll-thin md:pb-3 lg:p-5">
+    <div className="h-full overflow-y-auto p-3 pb-[calc(var(--mobile-nav,84px)+16px)] scroll-thin md:pb-3 lg:p-5">
       <div className="mx-auto flex max-w-[780px] flex-col gap-4">
         <header className="px-1">
           <h1 className="text-[30px] leading-tight font-bold tracking-tight md:text-[34px]">Tasks</h1>

@@ -3,7 +3,7 @@
 import { Ellipsis, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ALL_SECTIONS, SECTIONS, SETTINGS, type Section } from "@/lib/nav";
 import { CaptureButton } from "./capture/voice-capture";
 import { Sparkle } from "./sparkle";
@@ -67,10 +67,35 @@ function MobileTab({ section, active }: { section: Section; active: boolean }) {
   );
 }
 
-/** Phone bottom bar: Brief, Inbox, the mic, Calendar, and More for everything else. */
+/**
+ * Phone bottom bar: Brief, Inbox, the mic, Calendar, and More for everything else.
+ * Pages keep `--mobile-nav` of room at the bottom so nothing ends up hidden behind it. It's
+ * measured rather than fixed: the bar grows with the phone's text size, and the mic button
+ * sticks up out of it.
+ */
 export function MobileNav() {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
+  const navRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const measure = () => {
+      const bar = nav.getBoundingClientRect();
+      const mic = nav.querySelector('[aria-label="Voice note"]')?.getBoundingClientRect();
+      const top = Math.min(bar.top, mic?.top ?? bar.top);
+      document.documentElement.style.setProperty("--mobile-nav", `${Math.ceil(bar.bottom - top)}px`);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(nav);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
   const tab = (slug: string) => SECTIONS.find((s) => s.slug === slug)!;
   const inMore = ALL_SECTIONS.filter((s) => ![...MOBILE_TABS, ...MOBILE_TABS_RIGHT].includes(s.slug));
   const moreActive = inMore.some((s) => isActive(pathname, s));
@@ -82,7 +107,7 @@ export function MobileNav() {
           <nav
             aria-label="More"
             onClick={(e) => e.stopPropagation()}
-            className="absolute inset-x-3 bottom-[calc(76px+env(safe-area-inset-bottom))] grid grid-cols-3 gap-2 rounded-2xl border border-line-strong bg-raised p-3 shadow-2xl"
+            className="absolute inset-x-3 bottom-[calc(var(--mobile-nav,76px)+8px)] grid grid-cols-3 gap-2 rounded-2xl border border-line-strong bg-raised p-3 shadow-2xl"
           >
             {inMore.map((s) => {
               const Icon = s.icon;
@@ -103,7 +128,7 @@ export function MobileNav() {
           </nav>
         </div>
       )}
-      <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-sidebar/95 backdrop-blur md:hidden">
+      <nav ref={navRef} aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-sidebar/95 backdrop-blur md:hidden">
         <div className="mx-auto flex max-w-md items-center justify-around px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
           {MOBILE_TABS.map((slug) => (
             <MobileTab key={slug} section={tab(slug)} active={isActive(pathname, tab(slug))} />
