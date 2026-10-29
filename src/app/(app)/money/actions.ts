@@ -1,47 +1,36 @@
 "use server";
 
-import {
-  describeAiError,
-  interpretMoneyInstruction,
-  interpretMoneyQuestion,
-  reviewSorting,
-  sortMerchants,
-  type MoneyQuestionResult,
-} from "@/lib/ai/claude";
+import { describeAiError, interpretMoneyInstruction, interpretMoneyQuestion, sortMerchants, type MoneyQuestionResult } from "@/lib/ai/claude";
 import { signedIn } from "@/lib/auth/session";
 import { dayKey, isDayKey } from "@/lib/life/days";
 import type { CsvRow } from "@/lib/money/csv";
 import {
   addCategories,
-  addFlags,
   addRules,
   addTransactions,
   countUnsortedMerchants,
   deleteRule,
   deleteUpload,
-  flagKeys,
   getCategories,
   getFlag,
-  getReviewedAt,
   leaveCheck,
   listRules,
   merchantsByKey,
   merchantSummary,
   paymentsIn,
   resort,
-  reviewGroups,
   saveMerchants,
   setCategory,
   setFlagStatus,
-  setReviewedAt,
   setSplits,
   startUpload,
   transactionAmounts,
   transactionSpan,
-  unsortedMerchants,
 } from "@/lib/money/db";
+import { connectUp as connect, disconnectUp as disconnect, review, sortRound, syncUp, UpNotConnected } from "@/lib/money/jobs";
 import { cleanDescription, normalise, titleCase } from "@/lib/money/merchant";
 import type { MoneyQuery } from "@/lib/money/question";
+import { UpError } from "@/lib/money/up";
 import { INCOME, MAX_CATEGORY, MAX_SPLITS, TRANSFERS, UPLOAD_CHUNK, type ProposedRule, type SplitPart } from "@/lib/money/types";
 
 // Server Functions are public endpoints: check the session and validate every input.
@@ -51,14 +40,10 @@ const isTransactionId = (id: unknown): id is string => typeof id === "string" &&
 
 const MAX_ROWS = 50_000;
 const MAX_AMOUNT = 100_000_000_00;
-/** Merchants per Claude request when sorting. */
-const SORT_BATCH = 80;
 /** Merchants shown to Claude when it turns an instruction into rules, or a question into a query. */
 const RULE_CONTEXT = 600;
 /** Earlier questions sent along, so follow-ups make sense. */
 const EARLIER_QUESTIONS = 3;
-/** Lines of payments per Claude request when Atlas reviews the sorting. */
-const REVIEW_BATCH = 150;
 
 const cleanText = (value: unknown, max: number) =>
   typeof value === "string" && value.trim() && value.length <= max ? value.replace(/\s+/g, " ").trim() : null;
@@ -127,15 +112,8 @@ export async function removeUpload(uploadId: string) {
 /** One round of Atlas sorting merchants it hasn't seen; call again while `remaining` > 0. */
 export async function sortWithAtlas(): Promise<{ ok: true; sorted: number; remaining: number } | { ok: false; error: string }> {
   if (!(await signedIn())) return { ok: false, error: "Sign in again." };
-  const [batch, categories] = await Promise.all([unsortedMerchants(SORT_BATCH), getCategories()]);
-  if (batch.length === 0) return { ok: true, sorted: 0, remaining: 0 };
   try {
-    const sorted = await sortMerchants(
-      batch.map((m) => ({ ...m, sample: cleanDescription(m.sample) })),
-      categories,
-    );
-    await saveMerchants(sorted);
-    return { ok: true, sorted: sorted.length, remaining: await countUnsortedMerchants() };
+    return { ok: true, ...(await sortRound()) };
   } catch (error) {
     return { ok: false, error: describeAiError(error) };
   }
@@ -339,37 +317,14 @@ export async function askAboutMoney(
 
 // ---- Checking -----------------------------------------------------------------------------
 
-/**
- * Atlas reads how payments are sorted and flags the ones that look wrong. "new" covers only
- * what's arrived or changed since the last review (after an upload); "all" is everything.
- * A flag that was raised before, fixed or left, isn't raised again.
- */
+/** Atlas reads how payments are sorted and flags what looks wrong: just what's new (after an upload), or everything. */
 export async function reviewWithAtlas(
   scope: "new" | "all",
 ): Promise<{ ok: true; checked: number; flagged: number } | { ok: false; error: string }> {
   if (!(await signedIn())) return { ok: false, error: "Sign in again." };
   if (scope !== "new" && scope !== "all") return { ok: false, error: "Try again." };
-  const startedAt = Date.now();
-  const since = scope === "new" ? await getReviewedAt() : null;
-  // Never reviewed: start counting from now rather than reading everything unasked.
-  if (scope === "new" && since === null) {
-    await setReviewedAt(startedAt);
-    return { ok: true, checked: 0, flagged: 0 };
-  }
-  const [groups, categories, rules, raised] = await Promise.all([reviewGroups(since), getCategories(), listRules(), flagKeys()]);
-  if (groups.length === 0) {
-    await setReviewedAt(startedAt);
-    return { ok: true, checked: 0, flagged: 0 };
-  }
   try {
-    const lines = groups.map((g) => ({ ...g, samples: g.samples.map((s) => cleanDescription(s).slice(0, 80)) }));
-    const batches = Array.from({ length: Math.ceil(lines.length / REVIEW_BATCH) }, (_, i) => lines.slice(i * REVIEW_BATCH, (i + 1) * REVIEW_BATCH));
-    const ruleText = rules.map((r) => `${r.pattern} → ${r.category}`);
-    const found = (await Promise.all(batches.map((b) => reviewSorting(b, categories, ruleText)))).flat();
-    const fresh = found.filter((f) => !raised.has(`${f.key}|${f.currentCategory}|${f.category}`));
-    await addFlags(fresh.map((f) => ({ merchantKey: f.key, currentCategory: f.currentCategory, category: f.category, reason: f.reason })));
-    await setReviewedAt(startedAt);
-    return { ok: true, checked: groups.length, flagged: fresh.length };
+    return { ok: true, ...(await review(scope)) };
   } catch (error) {
     return { ok: false, error: describeAiError(error) };
   }
@@ -418,4 +373,48 @@ export async function resortMerchants(keys: string[]): Promise<{ ok: true; sorte
   } catch (error) {
     return { ok: false, error: describeAiError(error) };
   }
+}
+
+// ---- Up Bank ------------------------------------------------------------------------------
+
+/** Up's personal access tokens look like "up:yeah:" and then letters and numbers. */
+const UP_TOKEN = /^up:yeah:[A-Za-z0-9]{20,200}$/;
+
+function upProblem(error: unknown) {
+  if (error instanceof UpError && error.status === 401) return "Up didn't accept that token. Check you copied all of it, or make a new one.";
+  if (error instanceof UpError && error.status === 429) return "Up is limiting requests. Try again in a minute.";
+  if (error instanceof UpNotConnected) return "Up isn't connected.";
+  return "Couldn't reach Up. Try again.";
+}
+
+/** Connects Up with my personal access token (I paste it in; it's stored sealed), then syncs. */
+export async function connectUp(
+  token: string,
+): Promise<{ ok: true; live: boolean; added: number; linked: number; done: boolean } | { ok: false; error: string }> {
+  if (!(await signedIn())) return { ok: false, error: "Sign in again." };
+  const clean = typeof token === "string" ? token.trim() : "";
+  if (!UP_TOKEN.test(clean)) return { ok: false, error: "That doesn't look like an Up token. It starts with up:yeah:" };
+  try {
+    const res = await connect(clean);
+    return { ok: true, live: res.live, added: res.added, linked: res.linked, done: res.done };
+  } catch (error) {
+    return { ok: false, error: upProblem(error) };
+  }
+}
+
+export async function syncUpNow(): Promise<{ ok: true; added: number; done: boolean } | { ok: false; error: string }> {
+  if (!(await signedIn())) return { ok: false, error: "Sign in again." };
+  try {
+    const res = await syncUp(40_000);
+    return { ok: true, added: res.added, done: res.done };
+  } catch (error) {
+    return { ok: false, error: upProblem(error) };
+  }
+}
+
+/** Stops syncing with Up and forgets the token. What's already synced stays. */
+export async function disconnectUp() {
+  if (!(await signedIn())) return { ok: false as const };
+  await disconnect();
+  return { ok: true as const };
 }

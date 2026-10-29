@@ -42,6 +42,7 @@ import { CategoryBars, SpendingChart, Totals, UNSORTED, type ChartUnit } from ".
 import { Repeats } from "./repeats";
 import { SplitDialog } from "./split-dialog";
 import { NO_FILTERS, TransactionList, type ListFilters } from "./transactions";
+import { UpConnect, type UpStatus } from "./up-connect";
 import { UploadDialog } from "./upload-dialog";
 
 // The Money page: personal spending from bank CSVs. Everything is loaded once and
@@ -62,6 +63,8 @@ interface MoneyProps {
   leftChecks: string[];
   /** When Atlas last reviewed the sorting (ms). */
   reviewedAt: number | null;
+  /** Up Bank's sync, when it's connected. */
+  up: UpStatus | null;
   ownerName: string;
   today: string;
 }
@@ -86,7 +89,7 @@ const chip = (on: boolean) =>
     on ? "border-ink/50 bg-white/[0.08] text-ink" : "border-line-strong text-ink-soft hover:border-faint"
   }`;
 
-export function Money({ transactions: fromServer, rules, categories: savedCategories, uploads, flags, leftChecks, reviewedAt, ownerName, today }: MoneyProps) {
+export function Money({ transactions: fromServer, rules, categories: savedCategories, uploads, flags, leftChecks, reviewedAt, up, ownerName, today }: MoneyProps) {
   const router = useRouter();
   const toast = useToast();
   const [, startRefresh] = useTransition();
@@ -374,22 +377,25 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
         <div className="mx-auto flex max-w-[640px] flex-col gap-4 pt-6 md:pt-16">
           <h1 className="px-1 text-[30px] leading-tight font-bold tracking-tight md:text-[34px]">Money</h1>
           <section className="rounded-2xl border border-line bg-panel p-6">
-            <h2 className="text-[19px] font-bold tracking-tight">Start with a bank CSV</h2>
+            <h2 className="text-[19px] font-bold tracking-tight">Connect Up, or start with a bank CSV</h2>
             <p className="mt-2 text-[15px] leading-relaxed text-muted">
-              On your bank&apos;s website (the desktop site usually has it, not the app), open your everyday account&apos;s transactions, choose
-              Export or Download, and pick CSV. A few months to a year is ideal.
+              With Up Bank, Atlas pulls your transactions in by itself. For another bank, open your everyday account&apos;s transactions on its
+              website (the desktop site usually has it, not the app), choose Export or Download, and pick CSV. A few months to a year is ideal.
             </p>
             <p className="mt-2 text-[15px] leading-relaxed text-muted">
               Atlas sorts each merchant into a category, and you can tell it how in plain English. Nothing leaves Atlas except merchant names
               going to Claude for sorting.
             </p>
-            <button
-              type="button"
-              onClick={() => setUploading(true)}
-              className="mt-5 flex h-11 items-center gap-2 rounded-xl bg-ink px-5 text-[15px] font-semibold text-canvas hover:opacity-90"
-            >
-              <FileUp className="size-5" /> Upload a CSV
-            </button>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <UpConnect status={up} today={today} onChanged={refresh} />
+              <button
+                type="button"
+                onClick={() => setUploading(true)}
+                className="flex h-10 items-center gap-2 rounded-xl bg-ink px-5 text-[15px] font-semibold text-canvas hover:opacity-90"
+              >
+                <FileUp className="size-5" /> Upload a CSV
+              </button>
+            </div>
           </section>
         </div>
         {uploadDialog}
@@ -408,13 +414,16 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
               {range.from && range.to ? ` · ${shortDay(range.from)} to ${shortDay(range.to)}` : ""}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setUploading(true)}
-            className="flex h-10 items-center gap-2 rounded-xl border border-line-strong px-4 text-[14.5px] font-medium hover:border-faint hover:bg-white/[0.03]"
-          >
-            <FileUp className="size-[18px]" strokeWidth={1.75} /> Upload CSV
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <UpConnect status={up} today={today} onChanged={refresh} />
+            <button
+              type="button"
+              onClick={() => setUploading(true)}
+              className="flex h-10 items-center gap-2 rounded-xl border border-line-strong px-4 text-[14.5px] font-medium hover:border-faint hover:bg-white/[0.03]"
+            >
+              <FileUp className="size-[18px]" strokeWidth={1.75} /> Upload CSV
+            </button>
+          </div>
         </header>
 
         <AskAboutMoney

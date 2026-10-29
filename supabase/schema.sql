@@ -159,6 +159,11 @@ create table if not exists money_transactions (
 -- A payment split across categories: [{ "category": "Groceries", "cents": -59160 }, …],
 -- adding up to amount_cents. category then holds the biggest part, and sorted_by is 'me'.
 alter table money_transactions add column if not exists splits jsonb;
+-- From Up's API: Up's own id (so updates and deletions find the row) and 'HELD' or 'SETTLED'.
+-- CSV rows near where syncing began get Up's id too, once matched, so nothing doubles up.
+alter table money_transactions add column if not exists up_id text;
+alter table money_transactions add column if not exists status text;
+create unique index if not exists money_transactions_up on money_transactions (up_id) where up_id is not null;
 create index if not exists money_transactions_day on money_transactions (day);
 create index if not exists money_transactions_key on money_transactions (merchant_key);
 

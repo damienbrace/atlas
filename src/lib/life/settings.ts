@@ -8,6 +8,10 @@ export async function getSetting<T>(key: string, fallback: T): Promise<T> {
   return row ? row.value : fallback;
 }
 
+export async function deleteSetting(key: string) {
+  await sql`DELETE FROM settings WHERE key = ${key}`;
+}
+
 export async function setSetting(key: string, value: unknown) {
   await sql`
     INSERT INTO settings (key, value) VALUES (${key}, ${sql.json(value as never)})

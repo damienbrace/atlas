@@ -171,7 +171,7 @@ const HEADER_NAMES: Record<Role, string[]> = {
 
 // Only types that always mean "between my own accounts". Others ("TFR", "Transfer debit") can be
 // payments to other people, so those are left for Atlas to read.
-const OWN_ACCOUNT_TYPES = /^(transfer|round ?up|internal transfer|transfer between (my )?accounts)$/i;
+export const OWN_ACCOUNT_TYPES = /^(transfer|round ?up|internal transfer|transfer between (my )?accounts)$/i;
 
 const headerName = (cell: string) => cell.toLowerCase().replace(/[^a-z ]+/g, " ").replace(/\s+/g, " ").trim();
 
@@ -251,7 +251,7 @@ export function detectMapping(rows: string[][]): Mapping | null {
 }
 
 /** The description, with the payee in front when the description leaves them out (Up: "Transfer" to "Japan"). */
-function describe(description: string, payee: string) {
+export function describe(description: string, payee: string) {
   if (!payee) return description;
   if (!description) return payee;
   return description.toLowerCase().includes(payee.toLowerCase()) ? description : `${payee} · ${description}`;

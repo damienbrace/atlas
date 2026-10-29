@@ -1,8 +1,10 @@
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import { sql } from "@/lib/db";
-import { getSetting, setSetting } from "@/lib/life/settings";
+import { deleteSetting, getSetting, setSetting } from "@/lib/life/settings";
 import type { CsvRow } from "./csv";
+import { planUpRows, type KnownRow, type UpRow } from "./up-map";
+import { addDays } from "@/lib/life/days";
 import { merchantKey } from "./merchant";
 import { DEFAULT_CATEGORIES, TRANSFERS, type MoneyFlag, type Rule, type SortedBy, type SplitPart, type Transaction, type Upload } from "./types";
 
@@ -94,7 +96,10 @@ function transactionId(account: string, row: CsvRow) {
   return createHash("sha256").update(`${account}|${row.day}|${row.amountCents}|${row.description}|${row.seq}`).digest("hex").slice(0, 32);
 }
 
-/** Adds a chunk of an upload's rows (each in its own account if the file named one); returns how many were new. */
+/**
+ * Adds a chunk of an upload's rows (each in its own account if the file named one); returns
+ * how many were new. A row Up's sync already brought in (same account, day and amount) is skipped.
+ */
 export async function addTransactions(uploadId: string, account: string, rows: CsvRow[]) {
   const records = rows.map((r) => ({
     id: transactionId(r.account ?? account, r),
@@ -112,6 +117,9 @@ export async function addTransactions(uploadId: string, account: string, rows: C
       CASE WHEN r.transfer THEN ${TRANSFERS} END, CASE WHEN r.transfer THEN 'bank' END
     FROM jsonb_to_recordset(${sql.json(records)})
       AS r(id text, account text, day text, amount_cents bigint, description text, merchant_key text, balance_cents bigint, transfer boolean)
+    WHERE NOT EXISTS (
+      SELECT 1 FROM money_transactions e
+      WHERE e.up_id IS NOT NULL AND e.account = r.account AND e.day = r.day AND e.amount_cents = r.amount_cents)
     ON CONFLICT (id) DO NOTHING
     RETURNING id`;
   if (added.length) await sql`UPDATE money_imports SET added = added + ${added.length} WHERE id = ${uploadId}`;
@@ -342,4 +350,112 @@ export async function merchantsByKey(keys: string[]) {
     FROM money_transactions t
     WHERE t.merchant_key IN (SELECT jsonb_array_elements_text(${sql.json(keys)}))
     GROUP BY t.merchant_key`;
+}
+
+// ---- Up Bank ------------------------------------------------------------------------------
+
+const UP_KEY = "money.up";
+/** The upload every synced transaction belongs to; removing it removes them all. */
+const UP_IMPORT = "00000000-0000-4000-8000-000000000001";
+
+/** How Atlas is connected to Up. The token and webhook secret are sealed with SESSION_SECRET. */
+export interface UpConnection {
+  token: string;
+  webhookId: string | null;
+  webhookSecret: string | null;
+  connectedAt: number;
+  lastSyncAt: number | null;
+  accounts: { id: string; name: string; type: string; balanceCents: number }[];
+  /** Why the last sync failed, for the page. */
+  error: string | null;
+}
+
+export const getUpConnection = () => getSetting<UpConnection | null>(UP_KEY, null);
+/** Null forgets the connection. */
+export const setUpConnection = (connection: UpConnection | null) => (connection ? setSetting(UP_KEY, connection) : deleteSetting(UP_KEY));
+
+/** What the page may know: never the token or the secret. */
+export async function getUpStatus() {
+  const c = await getUpConnection();
+  if (!c) return null;
+  return { live: c.webhookId !== null, lastSyncAt: c.lastSyncAt, accounts: c.accounts.map((a) => ({ name: a.name, type: a.type, balanceCents: a.balanceCents })), error: c.error };
+}
+
+/** The latest day there are transactions for, or null. */
+export async function latestDay() {
+  const [row] = await sql<{ day: string | null }[]>`SELECT max(day) AS day FROM money_transactions`;
+  return row?.day ?? null;
+}
+
+const upTransactionId = (upId: string) => createHash("sha256").update(`up|${upId}`).digest("hex").slice(0, 32);
+
+/**
+ * Saves a page of Up's transactions: updates what's already synced (a held payment that's
+ * settled), claims the CSV row for the same payment, or adds it. Then re-sort.
+ */
+export async function saveUpRows(rows: UpRow[]) {
+  if (rows.length === 0) return { added: 0, linked: 0, updated: 0 };
+  const days = rows.map((r) => r.day).sort();
+  const accounts = [...new Set(rows.map((r) => r.account))];
+  const known = await sql<KnownRow[]>`
+    SELECT id, account, day, amount_cents AS "amountCents", up_id AS "upId" FROM money_transactions
+    WHERE (day BETWEEN ${addDays(days[0], -1)} AND ${addDays(days.at(-1)!, 1)} AND account IN ${sql(accounts)})
+       OR up_id IN ${sql(rows.map((r) => r.upId))}`;
+  const { update, link, add } = planUpRows(rows, known);
+
+  await sql`
+    INSERT INTO money_imports (id, file_name, account, rows, added, created_at)
+    VALUES (${UP_IMPORT}, 'Up Bank (synced)', 'Up', 0, 0, ${Date.now()}) ON CONFLICT (id) DO NOTHING`;
+  if (update.length) {
+    // A changed amount (a held payment settling for less) can't keep an old split.
+    await sql`
+      UPDATE money_transactions t SET amount_cents = d.amount, status = d.status,
+        splits = CASE WHEN t.amount_cents = d.amount THEN t.splits END
+      FROM jsonb_to_recordset(${sql.json(update.map((u) => ({ id: u.id, amount: u.row.amountCents, status: u.row.status })))})
+        AS d(id text, amount bigint, status text)
+      WHERE t.id = d.id`;
+  }
+  if (link.length) {
+    await sql`
+      UPDATE money_transactions t SET up_id = d.up_id, status = d.status
+      FROM jsonb_to_recordset(${sql.json(link.map((l) => ({ id: l.id, up_id: l.row.upId, status: l.row.status })))}) AS d(id text, up_id text, status text)
+      WHERE t.id = d.id`;
+  }
+  let added = 0;
+  if (add.length) {
+    const records = add.map((r) => ({
+      id: upTransactionId(r.upId),
+      up_id: r.upId,
+      account: r.account,
+      day: r.day,
+      amount_cents: r.amountCents,
+      description: r.description,
+      merchant_key: merchantKey(r.description),
+      status: r.status,
+      transfer: r.transfer,
+    }));
+    const inserted = await sql<{ id: string }[]>`
+      INSERT INTO money_transactions (id, up_id, account, day, amount_cents, description, merchant_key, status, import_id, created_at, category, sorted_by)
+      SELECT r.id, r.up_id, r.account, r.day, r.amount_cents, r.description, r.merchant_key, r.status, ${UP_IMPORT}, ${Date.now()},
+        CASE WHEN r.transfer THEN ${TRANSFERS} END, CASE WHEN r.transfer THEN 'bank' END
+      FROM jsonb_to_recordset(${sql.json(records)})
+        AS r(id text, up_id text, account text, day text, amount_cents bigint, description text, merchant_key text, status text, transfer boolean)
+      ON CONFLICT DO NOTHING
+      RETURNING id`;
+    added = inserted.length;
+  }
+  await sql`
+    UPDATE money_imports SET rows = c.n, added = c.n
+    FROM (SELECT count(*)::int AS n FROM money_transactions WHERE import_id = ${UP_IMPORT}) c WHERE id = ${UP_IMPORT}`;
+  return { added, linked: link.length, updated: update.length };
+}
+
+export async function deleteUpRows(upIds: string[]) {
+  if (upIds.length) await sql`DELETE FROM money_transactions WHERE up_id IN ${sql(upIds)}`;
+}
+
+/** Held payments from `fromDay` on that Up no longer lists: cancelled, or replaced when they settled. */
+export async function staleHeld(fromDay: string, seen: Set<string>) {
+  const rows = await sql<{ up_id: string }[]>`SELECT up_id FROM money_transactions WHERE status = 'HELD' AND up_id IS NOT NULL AND day >= ${fromDay}`;
+  return rows.map((r) => r.up_id).filter((id) => !seen.has(id));
 }
