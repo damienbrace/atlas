@@ -23,6 +23,7 @@ import { Dialog } from "@/components/dialog";
 import { useToast } from "@/components/toast";
 import { addDays, dayKey, parseDay, shortDay } from "@/lib/life/days";
 import { findIssues, ruleMatches, safePattern, type Issue } from "@/lib/money/checks";
+import { findHabits } from "@/lib/money/habits";
 import { merchantName, titleCase } from "@/lib/money/merchant";
 import {
   inRange,
@@ -39,11 +40,13 @@ import {
 import type { Span } from "@/lib/money/question";
 import { findRecurring } from "@/lib/money/recurring";
 import { expandSplits, splitByShares } from "@/lib/money/split";
+import { auditSubscriptions } from "@/lib/money/subscriptions";
 import { isFixed, MAX_CATEGORY, money, type MoneyFlag, type Rule, type SplitPart, type Transaction, type Upload } from "@/lib/money/types";
 import { UpAccounts } from "./accounts";
 import { AskAboutMoney } from "./ask-about-money";
 import { AskAtlas } from "./ask-atlas";
 import { ThingsToCheck, type FlagItem } from "./checks";
+import { Habits, Subscriptions } from "./insights";
 import { CategoryBars, SpendingChart, Totals, UNSORTED, type ChartUnit } from "./overview";
 import { Repeats } from "./repeats";
 import { SplitDialog } from "./split-dialog";
@@ -190,6 +193,13 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
   // The accounts card covers every account, whichever one the page is showing.
   const countedAll = useMemo(() => transactions.filter((t) => !t.excluded), [transactions]);
   const allRecurring = useMemo(() => (account ? findRecurring(countedAll, today) : recurring), [account, countedAll, recurring, today]);
+  const habits = useMemo(() => findHabits(countedAll, today), [countedAll, today]);
+  const subscriptions = useMemo(() => auditSubscriptions(countedAll, allRecurring, today), [countedAll, allRecurring, today]);
+  /** A business's payments, from any time, in the list. */
+  const showMerchant = (name: string) => {
+    setPeriod("all");
+    showTransactions({ merchant: name });
+  };
 
   const issues = useMemo(
     () => findIssues(transactions, rules, savedCategories, ownerName, left).filter((i) => !hidden.has(i.id)),
@@ -715,14 +725,14 @@ export function Money({ transactions: fromServer, rules, categories: savedCatego
                 }}
               />
             </div>
+            <div className="order-3">
+              <Habits habits={habits} onPick={showMerchant} />
+            </div>
+            <div className="order-3">
+              <Subscriptions audit={subscriptions} onPick={showMerchant} />
+            </div>
             <div className="order-5">
-              <Repeats
-                items={recurring}
-                onPick={(r) => {
-                  setPeriod("all");
-                  showTransactions({ merchant: r.name });
-                }}
-              />
+              <Repeats items={recurring} onPick={(r) => showMerchant(r.name)} />
             </div>
           </div>
         </div>
