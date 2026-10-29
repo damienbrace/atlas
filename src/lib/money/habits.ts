@@ -5,7 +5,7 @@ import { kindOf } from "./periods";
 import type { Transaction } from "./types";
 
 // Small spends that happen often (coffee, takeaway, the bottle shop), with what they come to
-// over a year at the rate of the last 90 days. The point is to make the drip visible.
+// over a year at the rate of the last 90 days (or the period picked). The point is to make the drip visible.
 // Safe in the browser and on the server.
 
 /** Where habits live; groceries, bills and the like are needs, not habits. */
@@ -34,17 +34,20 @@ function median(values: number[]) {
 
 const daysBetween = (a: string, b: string) => Math.round((parseDay(b).getTime() - parseDay(a).getTime()) / 86_400_000);
 
-/** The habits of the last 90 days, dearest per year first. Payments to people don't count. */
-export function findHabits(transactions: Transaction[], today: string): Habit[] {
-  let from = addDays(today, -(WINDOW_DAYS - 1));
+/**
+ * The habits of the 90 days to `to` (or from `from`), dearest per year first. Payments to
+ * people don't count.
+ */
+export function findHabits(transactions: Transaction[], to: string, from = addDays(to, -(WINDOW_DAYS - 1))): Habit[] {
   // A shorter history is spread over the days it actually covers.
-  const earliest = transactions.reduce((min, t) => (t.day < min ? t.day : min), today);
+  const earliest = transactions.reduce((min, t) => (t.day < min ? t.day : min), to);
   if (earliest > from) from = earliest;
-  const days = daysBetween(from, today) + 1;
+  const days = daysBetween(from, to) + 1;
+  if (days < 1) return [];
 
   const byName = new Map<string, Transaction[]>();
   for (const t of transactions) {
-    if (t.day < from || t.day > today || t.excluded || t.amountCents >= 0 || kindOf(t) !== "spend") continue;
+    if (t.day < from || t.day > to || t.excluded || t.amountCents >= 0 || kindOf(t) !== "spend") continue;
     if (!HABIT_CATEGORIES.has(t.category ?? "") || personMessage(t) || /^transfer (to|from) /i.test(merchantName(t))) continue;
     const name = merchantName(t);
     byName.set(name, [...(byName.get(name) ?? []), t]);

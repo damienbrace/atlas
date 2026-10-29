@@ -19,19 +19,22 @@ function often(perWeek: number) {
   return `${((perWeek * 52) / 12).toFixed(1).replace(/\.0$/, "")}× a month`;
 }
 
-export function Habits({ habits, onPick }: { habits: Habit[]; onPick: (name: string) => void }) {
-  if (habits.length === 0) return null;
+export function Habits({ habits, note, onPick }: { habits: Habit[]; note: string; onPick: (name: string) => void }) {
   const shown = habits.slice(0, SHOWN);
   const together = shown.reduce((sum, h) => sum + h.yearCents, 0);
   return (
     <section aria-label="Small habits" className={card}>
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-[17px] font-bold tracking-tight">Small habits</h2>
-        <p className="text-[13px] text-muted">last 90 days</p>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+        <h3 className="text-[17px] font-bold tracking-tight">Small habits</h3>
+        <p className="text-[13px] text-muted">{note}</p>
       </div>
-      <p className="mt-1 text-[13.5px] text-muted">
-        Together about <span className="font-semibold text-ink tabular-nums">{money(together, { whole: true })}</span> a year at this rate.
-      </p>
+      {shown.length === 0 ? (
+        <p className="mt-2 text-[14px] text-muted">No small spends came up often enough in these dates.</p>
+      ) : (
+        <p className="mt-1 text-[13.5px] text-muted">
+          Together about <span className="font-semibold text-ink tabular-nums">{money(together, { whole: true })}</span> a year at this rate.
+        </p>
+      )}
       <ul className="mt-1.5">
         {shown.map((h) => (
           <li key={h.name}>
@@ -66,7 +69,7 @@ export function Subscriptions({ audit, onPick }: SubscriptionsProps) {
   return (
     <section aria-label="Subscriptions" className={card}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-        <h2 className="text-[17px] font-bold tracking-tight">Subscriptions</h2>
+        <h3 className="text-[17px] font-bold tracking-tight">Subscriptions</h3>
         <p className="text-[13px] text-muted tabular-nums">
           <span className="font-semibold text-ink">{money(audit.monthlyCents, { whole: true })}</span> a month · {money(audit.yearCents, { whole: true })} a year
         </p>
