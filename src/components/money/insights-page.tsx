@@ -1,11 +1,12 @@
 "use client";
 
-import { ChevronLeft } from "lucide-react";
+import { CalendarRange, ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState, type ReactNode } from "react";
 import { MONTHS } from "@/lib/format";
 import { parseDay, shortDay } from "@/lib/life/days";
+import type { StoredAlert } from "@/lib/money/alerts";
 import { findIssues } from "@/lib/money/checks";
 import { findHabits } from "@/lib/money/habits";
 import {
@@ -44,6 +45,8 @@ interface InsightsPageProps {
   leftChecks: string[];
   rules: Rule[];
   categories: string[];
+  /** The latest alerts Hermes sends on Telegram. */
+  alerts: StoredAlert[];
   ownerName: string;
   today: string;
 }
@@ -133,7 +136,7 @@ const DAY_NAMES: Record<string, string> = { Mon: "Mondays", Tue: "Tuesdays", Wed
 const monthName = (day: string) => MONTHS[parseDay(day).getMonth()];
 const percent = (rate: number | null) => (rate === null ? "–" : `${Math.round(rate * 100)}%`);
 
-export function InsightsPage({ transactions, up, flags, leftChecks, rules, categories, ownerName, today }: InsightsPageProps) {
+export function InsightsPage({ transactions, up, flags, leftChecks, rules, categories, alerts, ownerName, today }: InsightsPageProps) {
   const router = useRouter();
   const showMerchant = (name: string) => router.push(`/money?merchant=${encodeURIComponent(name)}`);
 
@@ -213,42 +216,53 @@ export function InsightsPage({ transactions, up, flags, leftChecks, rules, categ
   return (
     <div className="h-full overflow-y-auto p-3 pb-[calc(var(--mobile-nav,84px)+16px)] scroll-thin md:pb-3 lg:p-5">
       <div className="mx-auto flex max-w-[1320px] flex-col gap-4">
-        <header className="px-1">
-          <Link href="/money" className="-ml-1.5 inline-flex h-8 items-center gap-1 rounded-lg pr-2 text-[14px] text-muted hover:text-ink">
-            <ChevronLeft className="size-4" /> Money
+        <header className="flex flex-wrap items-end justify-between gap-3 px-1">
+          <div>
+            <Link href="/money" className="-ml-1.5 inline-flex h-8 items-center gap-1 rounded-lg pr-2 text-[14px] text-muted hover:text-ink">
+              <ChevronLeft className="size-4" /> Money
+            </Link>
+            <h1 className="text-[30px] leading-tight font-bold tracking-tight md:text-[34px]">Insights</h1>
+            <p className="mt-1 text-[15px] text-muted">Worked out from your transactions. Anything left out of the totals stays out.</p>
+          </div>
+          <Link
+            href="/money/review"
+            className="flex h-10 items-center gap-2 rounded-xl border border-line-strong px-4 text-[14.5px] font-medium hover:border-faint hover:bg-white/[0.03]"
+          >
+            <CalendarRange className="size-[18px]" strokeWidth={1.75} /> Month &amp; year in review
           </Link>
-          <h1 className="text-[30px] leading-tight font-bold tracking-tight md:text-[34px]">Insights</h1>
-          <p className="mt-1 text-[15px] text-muted">Worked out from your transactions. Anything left out of the totals stays out.</p>
         </header>
 
         <h2 className={sectionLabel}>Right now</h2>
         <div className="grid gap-4 xl:grid-cols-2 xl:items-start">
-          <Card title="Safe to spend" note={pay ? `until ${shortDay(pay.nextDay)}` : undefined}>
-            {!pay ? (
-              <p className="mt-2 text-[14px] text-muted">Atlas hasn&apos;t spotted a regular pay yet.</p>
-            ) : !safe ? (
-              <p className="mt-2 text-[14px] text-muted">Connect Up on the Money page to see this.</p>
-            ) : (
-              <>
-                <p className="mt-2 flex flex-wrap items-baseline gap-x-2">
-                  <span className={`text-[30px] leading-tight font-semibold tracking-tight tabular-nums ${safe.safeCents < 0 ? "text-red" : ""}`}>
-                    {whole(safe.safeCents)}
-                  </span>
-                  <span className="text-[15px] text-muted">
-                    about {whole(Math.max(safe.perDayCents, 0))} a day for {safe.days} day{safe.days === 1 ? "" : "s"}
-                  </span>
-                </p>
-                <p className="mt-1 text-[13.5px] text-muted">
-                  Spending {money(safe.balanceCents)}
-                  {safe.bills.length > 0 && `, less ${money(safe.billsCents)} of bills before then (${safe.bills.map((b) => b.name).join(", ")})`}.
-                </p>
-                <p className="mt-1 text-[13px] text-faint">
-                  Pay: {pay.name} {money(pay.typicalCents)} every {pay.everyDays === 7 ? "week" : pay.everyDays === 14 ? "fortnight" : "month"}, next{" "}
-                  {shortDay(pay.nextDay)}.
-                </p>
-              </>
-            )}
-          </Card>
+          <div className="flex min-w-0 flex-col gap-4">
+            <Card title="Safe to spend" note={pay ? `until ${shortDay(pay.nextDay)}` : undefined}>
+              {!pay ? (
+                <p className="mt-2 text-[14px] text-muted">Atlas hasn&apos;t spotted a regular pay yet.</p>
+              ) : !safe ? (
+                <p className="mt-2 text-[14px] text-muted">Connect Up on the Money page to see this.</p>
+              ) : (
+                <>
+                  <p className="mt-2 flex flex-wrap items-baseline gap-x-2">
+                    <span className={`text-[30px] leading-tight font-semibold tracking-tight tabular-nums ${safe.safeCents < 0 ? "text-red" : ""}`}>
+                      {whole(safe.safeCents)}
+                    </span>
+                    <span className="text-[15px] text-muted">
+                      about {whole(Math.max(safe.perDayCents, 0))} a day for {safe.days} day{safe.days === 1 ? "" : "s"}
+                    </span>
+                  </p>
+                  <p className="mt-1 text-[13.5px] text-muted">
+                    Spending {money(safe.balanceCents)}
+                    {safe.bills.length > 0 && `, less ${money(safe.billsCents)} of bills before then (${safe.bills.map((b) => b.name).join(", ")})`}.
+                  </p>
+                  <p className="mt-1 text-[13px] text-faint">
+                    Pay: {pay.name} {money(pay.typicalCents)} every {pay.everyDays === 7 ? "week" : pay.everyDays === 14 ? "fortnight" : "month"}, next{" "}
+                    {shortDay(pay.nextDay)}.
+                  </p>
+                </>
+              )}
+            </Card>
+            <Alerts alerts={alerts} />
+          </div>
 
           <Card title="Your week so far" note={`${week.days} day${week.days === 1 ? "" : "s"} in`}>
             <p className="mt-2 text-[15px] text-ink-soft">
@@ -444,6 +458,50 @@ export function InsightsPage({ transactions, up, flags, leftChecks, rules, categ
         </div>
       </div>
     </div>
+  );
+}
+
+/** "*Price rise:* Netflix $22.99, usually $18.99." → the bold label and the first line of the rest. */
+function splitAlert(text: string) {
+  const m = text.match(/^\*([^*]+)\*\s*/);
+  return m ? { label: m[1], rest: text.slice(m[0].length).split("\n")[0] } : { label: "", rest: text.split("\n")[0] };
+}
+
+function Alerts({ alerts }: { alerts: StoredAlert[] }) {
+  return (
+    <Card title="Alerts" note="Hermes sends these on Telegram">
+      {alerts.length === 0 ? (
+        <p className="mt-2 text-[14px] text-muted">
+          Nothing yet. Atlas flags unusual or double charges, big first charges, price rises, new subscriptions and Spending running low before pay.
+        </p>
+      ) : (
+        <ul className="mt-1.5 divide-y divide-line">
+          {alerts.map((a) => {
+            const { label, rest } = splitAlert(a.text);
+            // A review's key is "review:month:2026-10".
+            const [, kind, id] = a.kind === "review" ? a.key.split(":") : [];
+            return (
+              <li key={a.key} className="py-2 text-[14px] leading-snug">
+                <p className="text-ink-soft">
+                  {label && <span className="font-semibold text-ink">{label} </span>}
+                  {kind ? (
+                    <Link href={`/money/review?${kind}=${id}`} className="underline decoration-faint underline-offset-2 hover:decoration-ink">
+                      Open the review
+                    </Link>
+                  ) : (
+                    rest
+                  )}
+                </p>
+                <p className="mt-0.5 text-[12px] text-faint">
+                  {shortDay(a.day)}
+                  {a.sentAt === null && " · waiting for Hermes"}
+                </p>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
   );
 }
 

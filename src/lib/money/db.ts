@@ -4,6 +4,7 @@ import { sql } from "@/lib/db";
 import { deleteSetting, getSetting, setSetting } from "@/lib/life/settings";
 import type { CsvRow } from "./csv";
 import { planUpRows, type KnownRow, type UpRow } from "./up-map";
+import type { AlertKind, MoneyAlert, StoredAlert } from "./alerts";
 import { addDays } from "@/lib/life/days";
 import { merchantKey } from "./merchant";
 import { DEFAULT_CATEGORIES, TRANSFERS, type MoneyFlag, type Rule, type SortedBy, type SplitPart, type Transaction, type Upload } from "./types";
@@ -337,6 +338,47 @@ export async function getFlag(id: string) {
 
 export async function setFlagStatus(id: string, status: "open" | "fixed" | "left") {
   await sql`UPDATE money_flags SET status = ${status} WHERE id = ${id}`;
+}
+
+// ---- Alerts --------------------------------------------------------------------------------
+
+type AlertRow = { key: string; kind: AlertKind; day: string; text: string; created_at: number; sent_at: number | null };
+const toAlert = (r: AlertRow): StoredAlert => ({ key: r.key, kind: r.kind, day: r.day, text: r.text, createdAt: Number(r.created_at), sentAt: r.sent_at === null ? null : Number(r.sent_at) });
+
+/** Saves alerts not raised before; returns how many were new. */
+export async function saveAlerts(alerts: MoneyAlert[]) {
+  if (alerts.length === 0) return 0;
+  const records = alerts.map((a) => ({ key: a.key, kind: a.kind, day: a.day, text: a.text }));
+  const added = await sql`
+    INSERT INTO money_alerts (key, kind, day, text, created_at)
+    SELECT a.key, a.kind, a.day, a.text, ${Date.now()}
+    FROM jsonb_to_recordset(${sql.json(records)}) AS a(key text, kind text, day text, text text)
+    ON CONFLICT (key) DO NOTHING
+    RETURNING key`;
+  return added.length;
+}
+
+/** Hands over the alerts not sent yet, oldest first, and marks them sent. Ones left waiting for days are dropped as stale. */
+export async function takeAlerts(staleAfterMs: number) {
+  const now = Date.now();
+  const rows = await sql<AlertRow[]>`
+    UPDATE money_alerts SET sent_at = ${now} WHERE sent_at IS NULL
+    RETURNING key, kind, day, text, created_at, sent_at`;
+  return rows
+    .map(toAlert)
+    .filter((a) => a.createdAt >= now - staleAfterMs)
+    .sort((a, b) => a.createdAt - b.createdAt || a.day.localeCompare(b.day));
+}
+
+export async function unsentAlerts() {
+  const rows = await sql<AlertRow[]>`SELECT key, kind, day, text, created_at, sent_at FROM money_alerts WHERE sent_at IS NULL ORDER BY created_at, day`;
+  return rows.map(toAlert);
+}
+
+/** The latest alerts, newest first, for the page. */
+export async function recentAlerts(limit = 12) {
+  const rows = await sql<AlertRow[]>`SELECT key, kind, day, text, created_at, sent_at FROM money_alerts ORDER BY created_at DESC, day DESC LIMIT ${limit}`;
+  return rows.map(toAlert);
 }
 
 /** A merchant's payments still in a category, with who put them there. */

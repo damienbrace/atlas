@@ -208,6 +208,18 @@ create table if not exists money_flags (
 );
 create index if not exists money_flags_key on money_flags (merchant_key);
 
+-- Money alerts for Hermes to send on Telegram (unusual charges, price rises, running low,
+-- the monthly review). The key stops the same thing being raised twice.
+create table if not exists money_alerts (
+  key text primary key,
+  kind text not null,
+  day text not null,
+  text text not null,
+  created_at bigint not null,
+  sent_at bigint                      -- when Hermes took it; null until then
+);
+create index if not exists money_alerts_created on money_alerts (created_at);
+
 -- ---- Lock the public API out ------------------------------------------------
 
 alter table journal enable row level security;
@@ -229,3 +241,4 @@ alter table money_merchants enable row level security;
 alter table money_rules enable row level security;
 alter table money_imports enable row level security;
 alter table money_flags enable row level security;
+alter table money_alerts enable row level security;

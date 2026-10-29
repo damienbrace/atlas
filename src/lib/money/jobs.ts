@@ -2,6 +2,8 @@ import "server-only";
 import { reviewSorting, sortMerchants } from "@/lib/ai/claude";
 import { seal, unseal } from "@/lib/auth/seal";
 import { env } from "@/lib/env";
+import { dayKey } from "@/lib/life/days";
+import { findAlerts } from "./alerts";
 import {
   addFlags,
   countUnsortedMerchants,
@@ -12,8 +14,10 @@ import {
   getUpConnection,
   latestDay,
   listRules,
+  listTransactions,
   resort,
   reviewGroups,
+  saveAlerts,
   saveMerchants,
   saveUpRows,
   setReviewedAt,
@@ -23,6 +27,8 @@ import {
   type UpConnection,
 } from "./db";
 import { cleanDescription } from "./merchant";
+import { findRecurring } from "./recurring";
+import { buildReview, lastMonth, reviewPath, reviewText, type ReviewChoice } from "./review";
 import * as up from "./up";
 import { toRow, type UpAccount, type UpRow } from "./up-map";
 
@@ -164,8 +170,12 @@ export async function upEvent(type: string, transactionId: string) {
   if (!row) return;
   await saveUpRows([row]);
   await resort();
-  // A merchant Atlas hasn't read: sort it now rather than leave it unsorted until morning.
-  if ((await countUnsortedMerchants()) > 0) await sortRound();
+  try {
+    // A merchant Atlas hasn't read: sort it now rather than leave it unsorted until morning.
+    if ((await countUnsortedMerchants()) > 0) await sortRound();
+  } finally {
+    await checkAlerts();
+  }
 }
 
 /**
@@ -211,5 +221,32 @@ export async function sortAndCheck() {
 export async function morningMoney(budgetMs: number) {
   // Sorting and checking still run if Up can't be reached; the page shows why.
   if (await getUpConnection()) await syncUp(budgetMs).catch((error) => console.error("Up sync failed", error));
-  await sortAndCheck();
+  try {
+    await sortAndCheck();
+  } finally {
+    await checkAlerts();
+  }
+}
+
+// ---- Alerts ------------------------------------------------------------------------------
+
+/**
+ * Raises any new alerts for Hermes to send: from the latest transactions, and on the 1st,
+ * last month's review (and on 1 January, last year's). Each is only ever raised once.
+ */
+export async function checkAlerts() {
+  const today = dayKey(new Date());
+  const [all, c] = await Promise.all([listTransactions(), getUpConnection()]);
+  const accounts = c?.accounts ?? [];
+  const counted = all.filter((t) => !t.excluded && t.day <= today);
+  const alerts = findAlerts({ transactions: counted, accounts, recurring: findRecurring(counted, today), today });
+  if (today.endsWith("-01")) {
+    const choices: ReviewChoice[] = [{ kind: "month", id: lastMonth(today) }];
+    if (today.endsWith("-01-01")) choices.push({ kind: "year", id: String(Number(today.slice(0, 4)) - 1) });
+    for (const choice of choices) {
+      const review = buildReview({ transactions: all, accounts, today, choice });
+      alerts.push({ key: `review:${choice.kind}:${choice.id}`, kind: "review", day: today, text: reviewText(review, `${env.appUrl}${reviewPath(choice)}`).text });
+    }
+  }
+  return saveAlerts(alerts);
 }
