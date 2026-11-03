@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { getGoogleAccount } from "@/lib/auth/account";
 import { sql } from "@/lib/db";
+import { GmailClient } from "@/lib/gmail/client";
 
 // Temporary: which kind of link opens an email in the Gmail app on Damien's phone.
 // Delete once one is picked.
@@ -21,6 +22,14 @@ export default async function GmailTest() {
   if (!account || !row) return <p className="p-6">Nothing to test with.</p>;
   const id = row.thread;
   const email = encodeURIComponent(account.email);
+  const thread = await new GmailClient(account.refreshToken).thread(id);
+  const first = thread.messages[0];
+  const header = (name: string) => first.payload.headers?.find((h) => h.name.toLowerCase() === name)?.value ?? "";
+  const messageId = header("message-id").replace(/[<>]/g, "");
+  const subject = header("subject");
+  // Ask the Gmail app to search; the query rides along as the standard search extra.
+  const search = (query: string) =>
+    `intent:#Intent;action=android.intent.action.SEARCH;package=${GMAIL};S.query=${encodeURIComponent(query)};end`;
 
   const links = [
     { label: "1. App, /mail/u/0/ + #all", href: intent(`https://mail.google.com/mail/u/0/#all/${id}`) },
@@ -29,6 +38,9 @@ export default async function GmailTest() {
     { label: "4. Plain link, /mail/u/0/ + #all", href: `https://mail.google.com/mail/u/0/#all/${id}` },
     { label: "5. App, /mail/ + #all (no account)", href: intent(`https://mail.google.com/mail/#all/${id}`) },
     { label: "6. Just open the Gmail app", href: `intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=${GMAIL};end` },
+    { label: "7. App search, by the email's ID", href: search(`rfc822msgid:${messageId}`) },
+    { label: "8. App search, by the subject", href: search(subject) },
+    { label: "9. App, Gmail's own link type (from iPhone)", href: `intent:///cv=${id}/accountId=1/searchOrLabel=inbox#Intent;scheme=googlegmail;package=${GMAIL};end` },
   ];
 
   return (

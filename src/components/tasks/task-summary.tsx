@@ -7,10 +7,10 @@ import { Dialog } from "@/components/dialog";
 import { iconButtonClass } from "@/components/icon-button";
 import { Sparkle } from "@/components/sparkle";
 import { useToast } from "@/components/toast";
-import { gmailAppUrl, isAndroid } from "@/lib/gmail/links";
+import { GMAIL_APP_URL, isAndroid } from "@/lib/gmail/links";
 import { dayKey, shortDay } from "@/lib/life/days";
 import { REPEAT_LABELS } from "@/lib/life/task-rules";
-import type { HelpResult, StoredBrief } from "@/lib/life/task-brief";
+import type { HelpResult, StoredBrief, TaskEmail } from "@/lib/life/task-brief";
 import type { Task } from "@/lib/life/tasks";
 import { AreaChip, DueChip } from "./task-parts";
 
@@ -37,14 +37,7 @@ const button =
   "flex h-10 items-center gap-1.5 rounded-xl border border-line-strong px-3.5 text-[14px] text-ink-soft hover:border-faint hover:text-ink disabled:opacity-40";
 const heading = "text-[12.5px] font-semibold tracking-wide text-faint uppercase";
 
-/** Gmail links open the Gmail app on an Android phone, and a new tab anywhere else. */
-const gmailLinkProps = (url: string) =>
-  isAndroid() ? { href: gmailAppUrl(url) } : { href: url, target: "_blank", rel: "noopener noreferrer" };
-
-const openGmail = (url: string) => {
-  if (isAndroid()) window.location.href = gmailAppUrl(url);
-  else window.open(url, "_blank", "noopener");
-};
+const webLink = (url: string) => ({ href: url, target: "_blank", rel: "noopener noreferrer" });
 
 const fetched = (res: Awaited<ReturnType<typeof loadTaskBrief>>): Load =>
   res.ok ? { state: "ready", brief: res.brief, results: res.results } : { state: "failed", error: res.error };
@@ -217,21 +210,7 @@ function Brief({
             <RefreshCw className="size-4" />
           </button>
         </div>
-        {brief.email && (
-          <a
-            {...gmailLinkProps(brief.email.url)}
-            className="mt-3 flex items-center gap-3 rounded-xl border border-line-strong bg-panel px-3 py-2.5 hover:border-faint"
-          >
-            <Mail className="size-5 shrink-0 text-ink-soft" />
-            <span className="min-w-0 flex-1">
-              <span className="block text-[14.5px] font-semibold">Open the email in Gmail</span>
-              <span className="block truncate text-[12.5px] text-muted">
-                {brief.email.from} · {shortDay(dayKey(new Date(brief.email.date)))} · {brief.email.subject}
-              </span>
-            </span>
-            <ExternalLink className="size-4 shrink-0 text-muted" />
-          </a>
-        )}
+        {brief.email && <EmailButton email={brief.email} />}
 
         {brief.todo.length > 0 && (
           <>
@@ -342,7 +321,7 @@ function HelpPanel({
     setBusy(false);
     if (!res.ok) return toast({ message: res.error });
     setDraftUrl(res.url);
-    toast({ message: "Saved to your Gmail drafts", actionLabel: "Open", onAction: () => openGmail(res.url) });
+    toast({ message: "Saved to your Gmail drafts", actionLabel: "Open", onAction: () => window.open(res.url, "_blank", "noopener") });
   }
 
   async function addToNotes() {
@@ -381,7 +360,7 @@ function HelpPanel({
         />
       </div>
       {draftUrl && (
-        <a {...gmailLinkProps(draftUrl)} className="mt-2 flex items-center gap-1.5 text-[13.5px] text-teal hover:underline">
+        <a {...webLink(draftUrl)} className="mt-2 flex items-center gap-1.5 text-[13.5px] text-teal hover:underline">
           Saved. Open it in Gmail to check and send <ExternalLink className="size-3.5" />
         </a>
       )}
@@ -415,6 +394,57 @@ function HelpPanel({
           Close
         </button>
       </div>
+    </div>
+  );
+}
+
+const emailCard = "flex w-full items-center gap-3 rounded-xl border border-line-strong bg-panel px-3 py-2.5 text-left hover:border-faint";
+
+/**
+ * The email a task came from. On an Android phone the Gmail app opens, but it can't be sent
+ * to one email, so the subject is copied first, ready to paste into the app's search.
+ */
+function EmailButton({ email }: { email: TaskEmail }) {
+  const about = `${email.from} · ${shortDay(dayKey(new Date(email.date)))} · ${email.subject}`;
+
+  if (!isAndroid()) {
+    return (
+      <a {...webLink(email.url)} className={`${emailCard} mt-3`}>
+        <Mail className="size-5 shrink-0 text-ink-soft" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-[14.5px] font-semibold">Open the email in Gmail</span>
+          <span className="block truncate text-[12.5px] text-muted">{about}</span>
+        </span>
+        <ExternalLink className="size-4 shrink-0 text-muted" />
+      </a>
+    );
+  }
+
+  async function openApp() {
+    try {
+      await navigator.clipboard.writeText(email.subject);
+    } catch {
+      // Open the app all the same; the subject is on screen.
+    }
+    window.location.href = GMAIL_APP_URL;
+  }
+
+  return (
+    <div className="mt-3">
+      <button type="button" onClick={() => void openApp()} className={emailCard}>
+        <Mail className="size-5 shrink-0 text-ink-soft" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-[14.5px] font-semibold">Open the Gmail app</span>
+          <span className="block truncate text-[12.5px] text-muted">{about}</span>
+        </span>
+        <ExternalLink className="size-4 shrink-0 text-muted" />
+      </button>
+      <p className="mt-1.5 text-[12.5px] text-muted">
+        Copies the subject first: paste it into Gmail&apos;s search to find the email.{" "}
+        <a {...webLink(email.url)} className="text-ink-soft underline underline-offset-2">
+          Or open it on the web
+        </a>
+      </p>
     </div>
   );
 }

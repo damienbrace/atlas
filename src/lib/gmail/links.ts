@@ -10,11 +10,10 @@ export const gmailComposeUrl = (account: string) => `${base(account)}&view=cm&fs
 export const gmailDraftUrl = (account: string, messageId: string) => `${base(account)}#drafts?compose=${messageId}`;
 
 /**
- * The same Gmail link, but on Android it opens in the Gmail app rather than the browser
- * (an intent link naming the app; mail.google.com is the app's own verified link host).
- * Without the app it falls back to Gmail on the web. Android keeps the link's #fragment.
+ * Opens the Gmail app on Android. It can't be sent to one email: tested on Damien's phone,
+ * intent links with mail.google.com thread addresses all fell back to the web.
  */
-export const gmailAppUrl = (webUrl: string) =>
-  `intent:${webUrl.replace(/^https:/, "")}#Intent;scheme=https;package=com.google.android.gm;S.browser_fallback_url=${encodeURIComponent(webUrl)};end`;
+export const GMAIL_APP_URL =
+  "intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=com.google.android.gm;end";
 
 export const isAndroid = () => typeof navigator !== "undefined" && /android/i.test(navigator.userAgent);
