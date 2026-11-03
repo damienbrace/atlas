@@ -23,9 +23,11 @@ import {
   AREA_COLORS,
   GROUP_LABELS,
   REPEAT_LABELS,
+  REPEAT_SHOW_DAYS,
   TASK_AREAS,
   TASK_VIEW_COOKIE,
   taskGroup,
+  waitingToShow,
   type TaskArea,
   type TaskGroup,
   type TaskView,
@@ -72,6 +74,7 @@ export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, to
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<Task[] | null>(null);
   const [showDone, setShowDone] = useState(false);
+  const [showWaiting, setShowWaiting] = useState(false);
   const [editing, setEditing] = useState<Editing>(null);
 
   // Search runs on the server so it covers the whole Done history, not just what's loaded.
@@ -86,7 +89,9 @@ export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, to
 
   const replace = (task: Task) => setTasks((all) => (all.some((t) => t.id === task.id) ? all.map((t) => (t.id === task.id ? task : t)) : [...all, task]));
   const inArea = (t: Task) => !area || t.area === area;
-  const open = tasks.filter((t) => !t.done && inArea(t)).sort(byPriorityThenDate);
+  const allOpen = tasks.filter((t) => !t.done && inArea(t)).sort(byPriorityThenDate);
+  const waiting = allOpen.filter((t) => waitingToShow(t, today));
+  const open = showWaiting ? allOpen : allOpen.filter((t) => !waitingToShow(t, today));
   const done = tasks.filter((t) => t.done && inArea(t)).sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0));
   const groups = GROUP_ORDER.map((g) => ({ group: g, items: open.filter((t) => taskGroup(t.dueDay, today) === g) })).filter((g) => g.items.length);
   const overdue = open.filter((t) => taskGroup(t.dueDay, today) === "overdue").length;
@@ -108,7 +113,8 @@ export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, to
     }
     if (res.next) {
       replace(res.next);
-      toast({ message: `Next one due ${res.next.dueDay === today ? "today" : shortDay(res.next.dueDay!)}` });
+      const due = `Next one due ${res.next.dueDay === today ? "today" : shortDay(res.next.dueDay!)}`;
+      toast({ message: waitingToShow(res.next, today) ? `${due}. It'll show ${REPEAT_SHOW_DAYS} days before.` : due });
     }
     if (res.removedId) setTasks((all) => all.filter((t) => t.id !== res.removedId));
   }
@@ -334,6 +340,19 @@ export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, to
                 </ul>
               </section>
             ))}
+
+            {waiting.length > 0 && (
+              <button
+                type="button"
+                aria-expanded={showWaiting}
+                onClick={() => setShowWaiting((s) => !s)}
+                className="self-center px-3 py-1 text-center text-[13.5px] text-faint hover:text-ink"
+              >
+                {showWaiting
+                  ? "Hide repeating tasks that aren't due soon"
+                  : `${waiting.length} repeating ${waiting.length === 1 ? "task" : "tasks"} hidden until ${REPEAT_SHOW_DAYS} days before due · Show`}
+              </button>
+            )}
 
             {view === "list" && done.length > 0 && (
               <section aria-label="Done" className="rounded-2xl border border-line bg-panel p-2">

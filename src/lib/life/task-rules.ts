@@ -52,6 +52,16 @@ export function nextDue(due: string | null, repeat: Repeat, today: string) {
   return next;
 }
 
+/**
+ * Repeating tasks keep out of the way until they're this close: a BAS due in April
+ * doesn't need to sit on the Tasks page from October. Started ones always show.
+ */
+export const REPEAT_SHOW_DAYS = 14;
+
+export function waitingToShow(t: { done: boolean; startedAt: number | null; repeat: Repeat | null; dueDay: string | null }, today: string) {
+  return !t.done && !t.startedAt && t.repeat !== null && t.dueDay !== null && t.dueDay > addDays(today, REPEAT_SHOW_DAYS);
+}
+
 /** The Tasks page shows a list or a board; the choice is remembered in this cookie. */
 export type TaskView = "list" | "board";
 export const TASK_VIEW_COOKIE = "tasks-view";
