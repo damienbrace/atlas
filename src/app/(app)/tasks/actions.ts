@@ -3,7 +3,7 @@
 import { signedIn } from "@/lib/auth/session";
 import type { Label } from "@/lib/inbox/types";
 import { isDayKey } from "@/lib/life/days";
-import { isRepeat, isTaskArea, type TaskArea } from "@/lib/life/task-rules";
+import { isRepeat, isShowDays, isTaskArea, type TaskArea } from "@/lib/life/task-rules";
 import { getSuggestion, resolveSuggestion, resolveThread, suggestionsForThreads } from "@/lib/life/task-suggestions";
 import { addTask, deleteTask, restoreTask, searchTasks, setTaskDone, setTaskStarted, updateTask, type Task, type TaskChange } from "@/lib/life/tasks";
 import { getThread } from "@/lib/mail/db";
@@ -48,6 +48,10 @@ function cleanChange(input: unknown): TaskChange | null {
     if (raw.repeat !== null && !isRepeat(raw.repeat)) return null;
     change.repeat = raw.repeat as TaskChange["repeat"];
   }
+  if ("showDays" in raw) {
+    if (raw.showDays !== null && !isShowDays(raw.showDays)) return null;
+    change.showDays = raw.showDays as number | null;
+  }
   return change;
 }
 
@@ -62,6 +66,7 @@ export async function createTask(input: TaskChange & { title: string }) {
     priority: change.priority ?? false,
     notes: change.notes ?? "",
     repeat: change.repeat ?? null,
+    showDays: change.showDays,
     threadId: null,
     source: "manual",
   });
@@ -130,6 +135,7 @@ export async function approveSuggestion(key: string, input: TaskChange = {}) {
     priority: change.priority ?? false,
     notes: change.notes ?? "",
     repeat: change.repeat ?? null,
+    showDays: change.showDays,
     threadId: suggestion.threadId,
     source: "email",
   });

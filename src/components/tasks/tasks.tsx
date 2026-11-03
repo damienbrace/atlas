@@ -23,7 +23,7 @@ import {
   AREA_COLORS,
   GROUP_LABELS,
   REPEAT_LABELS,
-  REPEAT_SHOW_DAYS,
+  showLabel,
   TASK_AREAS,
   TASK_VIEW_COOKIE,
   taskGroup,
@@ -54,7 +54,15 @@ function rememberView(view: TaskView) {
   document.cookie = `${TASK_VIEW_COOKIE}=${view}; path=/tasks; max-age=31536000; samesite=lax`;
 }
 
-const toDraft = (t: Task): TaskDraft => ({ title: t.title, dueDay: t.dueDay, area: t.area, priority: t.priority, notes: t.notes, repeat: t.repeat });
+const toDraft = (t: Task): TaskDraft => ({
+  title: t.title,
+  dueDay: t.dueDay,
+  area: t.area,
+  priority: t.priority,
+  notes: t.notes,
+  repeat: t.repeat,
+  showDays: t.showDays,
+});
 
 type Editing = { kind: "task"; task: Task } | { kind: "suggestion"; suggestion: TaskSuggestion } | null;
 
@@ -114,7 +122,7 @@ export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, to
     if (res.next) {
       replace(res.next);
       const due = `Next one due ${res.next.dueDay === today ? "today" : shortDay(res.next.dueDay!)}`;
-      toast({ message: waitingToShow(res.next, today) ? `${due}. It'll show ${REPEAT_SHOW_DAYS} days before.` : due });
+      toast({ message: waitingToShow(res.next, today) ? `${due}. It'll show ${showLabel(res.next.showDays).toLowerCase()}.` : due });
     }
     if (res.removedId) setTasks((all) => all.filter((t) => t.id !== res.removedId));
   }
@@ -349,8 +357,8 @@ export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, to
                 className="self-center px-3 py-1 text-center text-[13.5px] text-faint hover:text-ink"
               >
                 {showWaiting
-                  ? "Hide repeating tasks that aren't due soon"
-                  : `${waiting.length} repeating ${waiting.length === 1 ? "task" : "tasks"} hidden until ${REPEAT_SHOW_DAYS} days before due · Show`}
+                  ? "Hide tasks that aren't due soon"
+                  : `${waiting.length} ${waiting.length === 1 ? "task" : "tasks"} hidden until closer to the date · Show`}
               </button>
             )}
 
@@ -392,7 +400,7 @@ export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, to
       {editing?.kind === "suggestion" && (
         <TaskDialog
           mode="suggestion"
-          initial={{ title: editing.suggestion.title, dueDay: editing.suggestion.dueDay, area: editing.suggestion.area, priority: false, notes: "", repeat: null }}
+          initial={{ title: editing.suggestion.title, dueDay: editing.suggestion.dueDay, area: editing.suggestion.area, priority: false, notes: "", repeat: null, showDays: null }}
           threadId={editing.suggestion.threadId}
           today={today}
           onClose={() => setEditing(null)}

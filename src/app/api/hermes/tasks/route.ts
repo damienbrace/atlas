@@ -11,7 +11,9 @@ import { addTask, dueOpenTasks, listTasks, searchTasks } from "@/lib/life/tasks"
 // GET  ?view=done&days=7       open + ticked in the last N days, each with done/doneAt
 // GET  ?view=due&today=YYYY-MM-DD   open tasks due today or earlier
 // GET  ?view=search&q=words    any task mentioning the words
-// POST {title, dueDay?, area?, priority?, notes?, repeat?}
+// POST {title, dueDay?, area?, priority?, notes?, repeat?, showDays?}
+//      showDays: keep it off the Tasks page until this many days before due (null = always;
+//      left out, repeating tasks get 14). Each task carries showDays in the GET results.
 
 const unauthorized = () => Response.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -41,6 +43,7 @@ const TaskFields = z.object({
   priority: z.boolean().optional(),
   notes: z.string().max(5000).optional(),
   repeat: z.enum(REPEATS).nullable().optional(),
+  showDays: z.number().int().min(1).max(365).nullable().optional(),
 });
 
 export async function POST(request: Request) {
@@ -55,6 +58,7 @@ export async function POST(request: Request) {
     priority: t.priority ?? false,
     notes: t.notes ?? "",
     repeat: t.repeat ?? null,
+    showDays: t.showDays,
     threadId: null,
     source: "hermes",
   });

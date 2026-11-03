@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { sql, textList } from "@/lib/db";
 import { likePattern } from "@/lib/search-words";
 import { addDays, dayKey } from "./days";
-import { isRepeat, isTaskArea, nextDue, type Repeat, type TaskArea } from "./task-rules";
+import { isRepeat, isTaskArea, nextDue, REPEAT_SHOW_DAYS, type Repeat, type TaskArea } from "./task-rules";
 
 export interface Task {
   id: string;
@@ -20,6 +20,8 @@ export interface Task {
   /** The email thread it came from, if any. */
   threadId: string | null;
   repeat: Repeat | null;
+  /** Shown on the Tasks page only this many days before it's due; null = always. */
+  showDays: number | null;
 }
 
 interface Row {
@@ -34,6 +36,7 @@ interface Row {
   thread_id: string | null;
   repeat: string | null;
   next_id: string | null;
+  show_days: number | null;
 }
 
 const toTask = (r: Row): Task => ({
@@ -48,6 +51,7 @@ const toTask = (r: Row): Task => ({
   notes: r.notes,
   threadId: r.thread_id,
   repeat: isRepeat(r.repeat) ? r.repeat : null,
+  showDays: r.show_days,
 });
 
 /** Open tasks, plus ones ticked off in the last `doneDays` days (the Done list). */
@@ -115,19 +119,22 @@ export interface TaskInput {
   repeat: Repeat | null;
   threadId: string | null;
   source: string;
+  /** Left out, repeating tasks get REPEAT_SHOW_DAYS and the rest show straight away. */
+  showDays?: number | null;
 }
 
 export async function addTask(input: TaskInput) {
   const id = randomUUID();
+  const showDays = input.showDays !== undefined ? input.showDays : input.repeat ? REPEAT_SHOW_DAYS : null;
   const [row] = await sql<Row[]>`
-    INSERT INTO tasks (id, title, due_day, done_at, source, created_at, area, priority, notes, thread_id, repeat)
+    INSERT INTO tasks (id, title, due_day, done_at, source, created_at, area, priority, notes, thread_id, repeat, show_days)
     VALUES (${id}, ${input.title}, ${input.dueDay}, NULL, ${input.source}, ${Date.now()}, ${input.area}, ${input.priority},
-            ${input.notes}, ${input.threadId}, ${input.repeat})
+            ${input.notes}, ${input.threadId}, ${input.repeat}, ${showDays})
     RETURNING *`;
   return toTask(row);
 }
 
-export type TaskChange = Partial<Pick<TaskInput, "title" | "dueDay" | "area" | "priority" | "notes" | "repeat">>;
+export type TaskChange = Partial<Pick<TaskInput, "title" | "dueDay" | "area" | "priority" | "notes" | "repeat" | "showDays">>;
 
 const COLUMNS: Record<keyof TaskChange, string> = {
   title: "title",
@@ -136,6 +143,7 @@ const COLUMNS: Record<keyof TaskChange, string> = {
   priority: "priority",
   notes: "notes",
   repeat: "repeat",
+  showDays: "show_days",
 };
 
 export async function updateTask(id: string, change: TaskChange) {
@@ -160,6 +168,7 @@ export async function setTaskDone(id: string, done: boolean): Promise<{ next: Ta
       priority: row.priority,
       notes: row.notes,
       repeat: row.repeat,
+      showDays: row.show_days,
       threadId: null,
       source: "repeat",
     });

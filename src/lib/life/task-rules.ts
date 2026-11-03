@@ -53,13 +53,22 @@ export function nextDue(due: string | null, repeat: Repeat, today: string) {
 }
 
 /**
- * Repeating tasks keep out of the way until they're this close: a BAS due in April
- * doesn't need to sit on the Tasks page from October. Started ones always show.
+ * A dated task can keep off the Tasks page until it's close ("Show on Tasks" in its
+ * edit box): a BAS due in April doesn't need to sit there from October. These are
+ * the choices offered, in days before due; null shows it straight away.
  */
+export const SHOW_DAYS = [3, 7, 14, 21, 30, 60] as const;
+export const isShowDays = (value: unknown): value is number => Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 365;
+
+const SHOW_LABELS: Record<number, string> = { 7: "1 week", 14: "2 weeks", 21: "3 weeks", 30: "1 month", 60: "2 months" };
+export const showLabel = (days: number | null) => (days === null ? "Straight away" : `${SHOW_LABELS[days] ?? `${days} days`} before`);
+
+/** New repeating tasks start out like this; anything else shows straight away. */
 export const REPEAT_SHOW_DAYS = 14;
 
-export function waitingToShow(t: { done: boolean; startedAt: number | null; repeat: Repeat | null; dueDay: string | null }, today: string) {
-  return !t.done && !t.startedAt && t.repeat !== null && t.dueDay !== null && t.dueDay > addDays(today, REPEAT_SHOW_DAYS);
+/** Still too early to show. Started ones always show. */
+export function waitingToShow(t: { done: boolean; startedAt: number | null; dueDay: string | null; showDays: number | null }, today: string) {
+  return !t.done && !t.startedAt && t.showDays !== null && t.dueDay !== null && t.dueDay > addDays(today, t.showDays);
 }
 
 /** The Tasks page shows a list or a board; the choice is remembered in this cookie. */

@@ -55,6 +55,7 @@ alter table tasks add column if not exists repeat text;                -- daily,
 alter table tasks add column if not exists next_id text;               -- the repeat made when this one was ticked
 alter table tasks add column if not exists deleted_at bigint;          -- deleted, kept briefly so Undo works
 alter table tasks add column if not exists started_at bigint;          -- moved to Doing on the board
+alter table tasks add column if not exists show_days integer;          -- on the Tasks page only this many days before due; null = always
 create index if not exists tasks_due on tasks (due_day) where done_at is null and deleted_at is null;
 
 -- Tasks Atlas spotted while sorting email, waiting for Approve / Edit / Dismiss.

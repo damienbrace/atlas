@@ -93,7 +93,7 @@ export function EmailTask({ email }: { email: Email }) {
         {editing && (
           <TaskDialog
             mode="suggestion"
-            initial={{ title: suggestion.title, dueDay: suggestion.dueDay, area: suggestion.area, priority: false, notes: "", repeat: null }}
+            initial={{ title: suggestion.title, dueDay: suggestion.dueDay, area: suggestion.area, priority: false, notes: "", repeat: null, showDays: null }}
             threadId={null}
             today={today}
             onClose={() => setEditing(false)}

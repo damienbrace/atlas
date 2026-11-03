@@ -5,7 +5,17 @@ import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { Dialog } from "@/components/dialog";
 import { Sparkle } from "@/components/sparkle";
-import { REPEAT_LABELS, REPEATS, TASK_AREAS, AREA_COLORS, type Repeat, type TaskArea } from "@/lib/life/task-rules";
+import {
+  AREA_COLORS,
+  REPEAT_LABELS,
+  REPEAT_SHOW_DAYS,
+  REPEATS,
+  SHOW_DAYS,
+  showLabel,
+  TASK_AREAS,
+  type Repeat,
+  type TaskArea,
+} from "@/lib/life/task-rules";
 import { quickDays } from "./task-parts";
 
 export interface TaskDraft {
@@ -15,6 +25,7 @@ export interface TaskDraft {
   priority: boolean;
   notes: string;
   repeat: Repeat | null;
+  showDays: number | null;
 }
 
 interface TaskDialogProps {
@@ -28,6 +39,8 @@ interface TaskDialogProps {
   onDelete?: () => void;
 }
 
+const select =
+  "h-9 rounded-lg border border-line-strong bg-card px-2 text-[14px] text-ink outline-none [color-scheme:dark] focus:border-faint";
 const field = "w-full rounded-lg border border-line-strong bg-card px-3 py-2 text-[15px] outline-none focus:border-faint";
 const chip = (on: boolean) =>
   `h-8 rounded-full border px-3 text-[13.5px] ${on ? "border-ink bg-ink text-canvas" : "border-line-strong text-ink-soft hover:border-faint"}`;
@@ -79,6 +92,25 @@ export function TaskDialog({ mode, initial, threadId, today, onClose, onSave, on
             onChange={(e) => set({ dueDay: e.target.value || null })}
             className={`${field} [color-scheme:dark]`}
           />
+          {draft.dueDay && (
+            <label className="mt-1 flex flex-wrap items-center gap-2 text-[14px] text-muted">
+              Show on Tasks
+              <select
+                value={draft.showDays ?? ""}
+                onChange={(e) => set({ showDays: e.target.value ? Number(e.target.value) : null })}
+                className={select}
+              >
+                <option value="">{showLabel(null)}</option>
+                {[...new Set([...SHOW_DAYS, ...(draft.showDays ? [draft.showDays] : [])])]
+                  .sort((a, b) => a - b)
+                  .map((days) => (
+                    <option key={days} value={days}>
+                      {showLabel(days)}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          )}
         </fieldset>
 
         <fieldset>
@@ -120,8 +152,12 @@ export function TaskDialog({ mode, initial, threadId, today, onClose, onSave, on
             Repeat
             <select
               value={draft.repeat ?? ""}
-              onChange={(e) => set({ repeat: (e.target.value || null) as Repeat | null })}
-              className="h-9 rounded-lg border border-line-strong bg-card px-2 text-[14px] text-ink outline-none [color-scheme:dark] focus:border-faint"
+              onChange={(e) => {
+                const repeat = (e.target.value || null) as Repeat | null;
+                // A task that starts repeating keeps out of the way until it's close, as new repeats do.
+                set(repeat && !draft.repeat && draft.showDays === null ? { repeat, showDays: REPEAT_SHOW_DAYS } : { repeat });
+              }}
+              className={select}
             >
               <option value="">Never</option>
               {REPEATS.map((r) => (

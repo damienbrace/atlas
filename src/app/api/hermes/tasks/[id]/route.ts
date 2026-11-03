@@ -5,7 +5,7 @@ import { isDayKey } from "@/lib/life/days";
 import { REPEATS, TASK_AREAS } from "@/lib/life/task-rules";
 import { deleteTask, setTaskDone, updateTask, type TaskChange } from "@/lib/life/tasks";
 
-// One task, for Hermes. PATCH {done?, title?, dueDay?, area?, priority?, notes?, repeat?}
+// One task, for Hermes. PATCH {done?, title?, dueDay?, area?, priority?, notes?, repeat?, showDays?}
 // (ticking a repeating task makes the next one, same as in the app). DELETE removes it.
 
 const ID = /^[0-9a-f-]{36}$/i;
@@ -19,6 +19,7 @@ const Change = z.object({
   priority: z.boolean().optional(),
   notes: z.string().max(5000).optional(),
   repeat: z.enum(REPEATS).nullable().optional(),
+  showDays: z.number().int().min(1).max(365).nullable().optional(),
 });
 
 export async function PATCH(request: NextRequest, ctx: RouteContext<"/api/hermes/tasks/[id]">) {
