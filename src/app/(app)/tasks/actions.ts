@@ -5,7 +5,7 @@ import type { Label } from "@/lib/inbox/types";
 import { isDayKey } from "@/lib/life/days";
 import { isRepeat, isTaskArea, type TaskArea } from "@/lib/life/task-rules";
 import { getSuggestion, resolveSuggestion, resolveThread, suggestionsForThreads } from "@/lib/life/task-suggestions";
-import { addTask, deleteTask, restoreTask, searchTasks, setTaskDone, updateTask, type Task, type TaskChange } from "@/lib/life/tasks";
+import { addTask, deleteTask, restoreTask, searchTasks, setTaskDone, setTaskStarted, updateTask, type Task, type TaskChange } from "@/lib/life/tasks";
 import { getThread } from "@/lib/mail/db";
 import { triageKey } from "@/lib/mail/sync";
 import { annotationsFor } from "@/lib/store";
@@ -81,6 +81,18 @@ export async function markTask(id: string, done: boolean) {
   if (!(await signedIn())) return { ok: false as const };
   if (!isId(id) || typeof done !== "boolean") return { ok: false as const };
   return { ok: true as const, ...(await setTaskDone(id, done)) };
+}
+
+/**
+ * Moves a task to To do or Doing on the board, unticking it first if it was done
+ * (which takes away a repeat's next one, as unticking in the list does).
+ */
+export async function moveTask(id: string, to: "todo" | "doing") {
+  if (!(await signedIn())) return { ok: false as const };
+  if (!isId(id) || (to !== "todo" && to !== "doing")) return { ok: false as const };
+  const { removedId } = await setTaskDone(id, false);
+  const task = await setTaskStarted(id, to === "doing");
+  return task ? { ok: true as const, task, removedId } : { ok: false as const };
 }
 
 export async function removeTask(id: string) {

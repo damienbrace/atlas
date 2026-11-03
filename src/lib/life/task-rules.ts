@@ -52,6 +52,10 @@ export function nextDue(due: string | null, repeat: Repeat, today: string) {
   return next;
 }
 
+/** The Tasks page shows a list or a board; the choice is remembered in this cookie. */
+export type TaskView = "list" | "board";
+export const TASK_VIEW_COOKIE = "tasks-view";
+
 export type TaskGroup = "overdue" | "today" | "week" | "later" | "someday";
 
 export const GROUP_LABELS: Record<TaskGroup, string> = {

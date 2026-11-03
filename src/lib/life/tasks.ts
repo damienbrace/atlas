@@ -12,6 +12,8 @@ export interface Task {
   dueDay: string | null;
   done: boolean;
   doneAt: number | null;
+  /** When it went to Doing on the board; null while it's still To do. */
+  startedAt: number | null;
   area: TaskArea | null;
   priority: boolean;
   notes: string;
@@ -25,6 +27,7 @@ interface Row {
   title: string;
   due_day: string | null;
   done_at: number | null;
+  started_at: number | null;
   area: string | null;
   priority: boolean;
   notes: string;
@@ -39,6 +42,7 @@ const toTask = (r: Row): Task => ({
   dueDay: r.due_day,
   done: r.done_at !== null,
   doneAt: r.done_at,
+  startedAt: r.started_at,
   area: isTaskArea(r.area) ? r.area : null,
   priority: r.priority,
   notes: r.notes,
@@ -168,6 +172,13 @@ export async function setTaskDone(id: string, done: boolean): Promise<{ next: Ta
          reopened AS (UPDATE tasks SET done_at = NULL, next_id = NULL WHERE id = ${id})
     DELETE FROM tasks WHERE id = (SELECT next_id FROM old) AND done_at IS NULL RETURNING id`;
   return { next: null, removedId: removed[0]?.id ?? null };
+}
+
+/** Moves a task to Doing on the board, or back to To do. */
+export async function setTaskStarted(id: string, started: boolean) {
+  const [row] = await sql<Row[]>`
+    UPDATE tasks SET started_at = ${started ? Date.now() : null} WHERE id = ${id} AND deleted_at IS NULL RETURNING *`;
+  return row ? toTask(row) : null;
 }
 
 /** Deleted tasks stay hidden in the table so Undo can bring them back. */

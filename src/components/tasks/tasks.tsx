@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, Ellipsis, Flag, Mail, Plus, Repeat as RepeatIcon, Search, StickyNote, X } from "lucide-react";
+import { Check, ChevronDown, Columns3, Ellipsis, Flag, List, Mail, Plus, Repeat as RepeatIcon, Search, StickyNote, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import {
@@ -10,6 +10,7 @@ import {
   editTask,
   findTasks,
   markTask,
+  moveTask,
   removeTask,
   undoRemoveTask,
 } from "@/app/(app)/tasks/actions";
@@ -18,14 +19,25 @@ import { Menu } from "@/components/menu";
 import { Sparkle } from "@/components/sparkle";
 import { useToast } from "@/components/toast";
 import { addDays, shortDay } from "@/lib/life/days";
-import { AREA_COLORS, GROUP_LABELS, REPEAT_LABELS, TASK_AREAS, taskGroup, type TaskArea, type TaskGroup } from "@/lib/life/task-rules";
+import {
+  AREA_COLORS,
+  GROUP_LABELS,
+  REPEAT_LABELS,
+  TASK_AREAS,
+  TASK_VIEW_COOKIE,
+  taskGroup,
+  type TaskArea,
+  type TaskGroup,
+  type TaskView,
+} from "@/lib/life/task-rules";
 import type { TaskSuggestion } from "@/lib/life/task-suggestions";
 import type { Task } from "@/lib/life/tasks";
+import { boardColumn, TaskBoard, type BoardColumn } from "./task-board";
 import { TaskDialog, type TaskDraft } from "./task-dialog";
 import { AreaChip, DueChip, quickDays } from "./task-parts";
 
-// The Tasks page: everything to do, grouped by when, with Atlas's suggestions from
-// email waiting on top for Approve / Edit / Dismiss.
+// The Tasks page: everything to do, grouped by when (or on a To do / Doing / Done
+// board), with Atlas's suggestions from email waiting on top for Approve / Edit / Dismiss.
 
 const GROUP_ORDER: TaskGroup[] = ["overdue", "today", "week", "later", "someday"];
 
@@ -33,6 +45,11 @@ const GROUP_ORDER: TaskGroup[] = ["overdue", "today", "week", "later", "someday"
 function byPriorityThenDate(a: Task, b: Task) {
   if (a.priority !== b.priority) return a.priority ? -1 : 1;
   return (a.dueDay ?? "9999").localeCompare(b.dueDay ?? "9999");
+}
+
+/** Kept in a cookie so the page opens the same way next time, without a flash of the other view. */
+function rememberView(view: TaskView) {
+  document.cookie = `${TASK_VIEW_COOKIE}=${view}; path=/tasks; max-age=31536000; samesite=lax`;
 }
 
 const toDraft = (t: Task): TaskDraft => ({ title: t.title, dueDay: t.dueDay, area: t.area, priority: t.priority, notes: t.notes, repeat: t.repeat });
@@ -43,10 +60,12 @@ interface TasksProps {
   tasks: Task[];
   suggestions: TaskSuggestion[];
   today: string;
+  view: TaskView;
 }
 
-export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, today }: TasksProps) {
+export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, today, view: initialView }: TasksProps) {
   const toast = useToast();
+  const [view, setView] = useState(initialView);
   const [tasks, setTasks] = useState(initialTasks);
   const [suggestions, setSuggestions] = useState(initialSuggestions);
   const [area, setArea] = useState<TaskArea | null>(null);
@@ -72,6 +91,12 @@ export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, to
   const groups = GROUP_ORDER.map((g) => ({ group: g, items: open.filter((t) => taskGroup(t.dueDay, today) === g) })).filter((g) => g.items.length);
   const overdue = open.filter((t) => taskGroup(t.dueDay, today) === "overdue").length;
   const dueToday = open.filter((t) => t.dueDay === today).length;
+  const doing = open.filter((t) => t.startedAt).length;
+
+  function switchView(next: TaskView) {
+    setView(next);
+    rememberView(next);
+  }
 
   async function toggle(task: Task) {
     const flip = (value: boolean) => replace({ ...task, done: value, doneAt: value ? Date.now() : null });
@@ -85,6 +110,20 @@ export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, to
       replace(res.next);
       toast({ message: `Next one due ${res.next.dueDay === today ? "today" : shortDay(res.next.dueDay!)}` });
     }
+    if (res.removedId) setTasks((all) => all.filter((t) => t.id !== res.removedId));
+  }
+
+  /** A move on the board. Into Done is a tick; out of Done unticks it too. */
+  async function move(task: Task, to: BoardColumn) {
+    if (to === boardColumn(task)) return;
+    if (to === "done") return toggle(task);
+    replace({ ...task, done: false, doneAt: null, startedAt: to === "doing" ? Date.now() : null });
+    const res = await moveTask(task.id, to).catch(() => ({ ok: false as const }));
+    if (!res.ok) {
+      replace(task);
+      return toast({ message: "Couldn't move that task" });
+    }
+    replace(res.task);
     if (res.removedId) setTasks((all) => all.filter((t) => t.id !== res.removedId));
   }
 
@@ -142,14 +181,32 @@ export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, to
 
   return (
     <div className="h-full overflow-y-auto p-3 pb-[calc(var(--mobile-nav,84px)+16px)] scroll-thin md:pb-3 lg:p-5">
-      <div className="mx-auto flex max-w-[780px] flex-col gap-4">
-        <header className="px-1">
-          <h1 className="text-[30px] leading-tight font-bold tracking-tight md:text-[34px]">Tasks</h1>
-          <p className="mt-1.5 text-[15px] text-muted">
-            {open.length === 0
-              ? "Nothing to do. A clear run."
-              : [overdue && `${overdue} overdue`, dueToday && `${dueToday} today`, `${open.length} open`].filter(Boolean).join(" · ")}
-          </p>
+      <div className={`mx-auto flex flex-col gap-4 ${view === "board" ? "max-w-[1180px]" : "max-w-[780px]"}`}>
+        <header className="flex items-start justify-between gap-3 px-1">
+          <div className="min-w-0">
+            <h1 className="text-[30px] leading-tight font-bold tracking-tight md:text-[34px]">Tasks</h1>
+            <p className="mt-1.5 text-[15px] text-muted">
+              {open.length === 0
+                ? "Nothing to do. A clear run."
+                : [overdue && `${overdue} overdue`, dueToday && `${dueToday} today`, doing && `${doing} doing`, `${open.length} open`]
+                    .filter(Boolean)
+                    .join(" · ")}
+            </p>
+          </div>
+          <div role="group" aria-label="Show tasks as" className="mt-1.5 flex shrink-0 rounded-lg border border-line-strong p-0.5">
+            {(["list", "board"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                aria-pressed={view === v}
+                onClick={() => switchView(v)}
+                className={`flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] ${view === v ? "bg-white/[0.08] text-ink" : "text-muted hover:text-ink"}`}
+              >
+                {v === "list" ? <List className="size-4" /> : <Columns3 className="size-4" />}
+                {v === "list" ? "List" : "Board"}
+              </button>
+            ))}
+          </div>
         </header>
 
         <AddTask today={today} area={area} onAdded={replace} />
@@ -253,13 +310,15 @@ export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, to
               </section>
             )}
 
-            {groups.length === 0 && (
+            {view === "board" && <TaskBoard open={open} done={done} onMove={move} {...rowProps} />}
+
+            {view === "list" && groups.length === 0 && (
               <p className="rounded-2xl border border-dashed border-line-strong px-4 py-8 text-center text-[15px] text-muted">
                 {area ? `No open ${area} tasks.` : "No open tasks. Add one above, or say it in a voice note."}
               </p>
             )}
 
-            {groups.map(({ group, items }) => (
+            {view === "list" && groups.map(({ group, items }) => (
               <section key={group} aria-label={GROUP_LABELS[group]} className="rounded-2xl border border-line bg-panel p-2">
                 <h2
                   className={`px-3 pt-2 pb-1 text-[12.5px] font-semibold tracking-wide uppercase ${
@@ -276,7 +335,7 @@ export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, to
               </section>
             ))}
 
-            {done.length > 0 && (
+            {view === "list" && done.length > 0 && (
               <section aria-label="Done" className="rounded-2xl border border-line bg-panel p-2">
                 <button
                   type="button"
@@ -372,8 +431,9 @@ function TaskRow({ task: t, today, onToggle, onOpen, onSnooze, onChange, onDelet
           {t.priority && !t.done && <Flag aria-label="Flagged" className="mr-1.5 inline size-3.5 -translate-y-px fill-current text-ink-soft" />}
           {t.title}
         </span>
-        {(t.dueDay || t.area || t.repeat || t.threadId || t.notes) && !t.done && (
+        {(t.startedAt || t.dueDay || t.area || t.repeat || t.threadId || t.notes) && !t.done && (
           <span className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            {t.startedAt && <span className="text-[12.5px] font-medium text-ink-soft">Doing</span>}
             {t.dueDay && <DueChip dueDay={t.dueDay} today={today} />}
             {t.area && <AreaChip area={t.area} />}
             {t.repeat && (
