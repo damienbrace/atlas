@@ -56,10 +56,25 @@ const header = (message: GmailMessage, name: string) =>
 
 const words = (text: string) => new Set(text.toLowerCase().split(/[^a-z0-9$]+/).filter((w) => w.length > 2));
 
-/** Hermes puts the sender on a "From: Name <address>" line in the notes of the tasks it makes from email. */
+/** Parts of an address's domain that say nothing about who sent it. */
+const PLAIN_DOMAIN_PARTS = new Set([
+  ...["com", "net", "org", "gov", "edu", "mail", "email", "info", "news"],
+  ...["gmail", "googlemail", "outlook", "hotmail", "live", "yahoo", "icloud", "bigpond", "optusnet"],
+]);
+
+/** The "From: Name <address>" line Hermes puts in the notes of the tasks it makes from email. */
 function senderOf(notes: string) {
   const line = notes.split("\n").find((l) => l.trim().toLowerCase().startsWith("from:"));
-  return line?.match(/[^\s<>"',;]+@[^\s<>"',;]+/)?.[0] ?? null;
+  if (!line) return null;
+  const address = line.match(/[^\s<>"',;]+@[^\s<>"',;]+/)?.[0] ?? "";
+  // The person's name without any "(Company)" after it, and the telling part of the domain.
+  const name = line.slice(line.indexOf(":") + 1).split("<")[0].replace(/\(.*?\)/g, "").replace(/["']/g, "").trim();
+  const site =
+    (address.split("@")[1] ?? "")
+      .split(".")
+      .filter((p) => p.length >= 4 && !PLAIN_DOMAIN_PARTS.has(p))
+      .sort((a, b) => b.length - a.length)[0] ?? "";
+  return { address, name, site };
 }
 
 /**
@@ -72,16 +87,28 @@ async function findEmail(task: Task, gmail: GmailClient): Promise<GmailThread | 
   }
   const sender = senderOf(task.notes);
   if (!sender) return null;
-  const after = Math.floor((task.createdAt - 45 * DAY) / 1000);
-  const before = Math.floor((task.createdAt + 2 * DAY) / 1000);
-  const { ids } = await gmail.listMessages(`from:${sender} after:${after} before:${before}`, undefined, 6);
-  if (ids.length === 0) return null;
+  const window = `after:${Math.floor((task.createdAt - 60 * DAY) / 1000)} before:${Math.floor((task.createdAt + 2 * DAY) / 1000)}`;
   const want = words(task.title);
-  const messages = await Promise.all(ids.map((id) => gmail.message(id)));
+  const keywords = [...want].filter((w) => w.length >= 4 && !/^\$?\d/.test(w)).sort((a, b) => b.length - a.length).slice(0, 3);
   const score = (m: GmailMessage) => [...words(`${header(m, "Subject")} ${m.snippet}`)].filter((w) => want.has(w)).length;
-  // Most words in common with the title; a tie goes to the newer one (ids come newest first).
-  const best = messages.reduce((a, b) => (score(b) > score(a) ? b : a));
-  return gmail.thread(best.threadId);
+
+  // Hermes sometimes gets the address a little wrong (".com" for ".com.au"), so looser
+  // searches follow the exact one. Those only count an email whose subject matches the title.
+  const searches: { q: string; minScore: number }[] = [];
+  if (sender.address) searches.push({ q: `from:${sender.address}`, minScore: 0 });
+  if (sender.name) searches.push({ q: `from:"${sender.name}"`, minScore: 2 });
+  if (sender.site) searches.push({ q: `from:${sender.site}`, minScore: 2 });
+  if (keywords.length >= 2) searches.push({ q: keywords.join(" "), minScore: 2 });
+
+  for (const { q, minScore } of searches) {
+    const { ids } = await gmail.listMessages(`${q} ${window}`, undefined, 6);
+    if (ids.length === 0) continue;
+    const messages = await Promise.all(ids.map((id) => gmail.message(id)));
+    // Most words in common with the title; a tie goes to the newer one (ids come newest first).
+    const best = messages.reduce((a, b) => (score(b) > score(a) ? b : a));
+    if (score(best) >= minScore) return gmail.thread(best.threadId);
+  }
+  return null;
 }
 
 const fromThem = (thread: ParsedThread) => [...thread.messages].reverse().find((m) => !m.sentByMe) ?? thread.messages.at(-1);
