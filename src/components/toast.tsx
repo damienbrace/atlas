@@ -15,6 +15,8 @@ type ShowToast = (toast: Omit<Toast, "id">) => void;
 const ToastContext = createContext<ShowToast | null>(null);
 
 const VISIBLE_MS = 5000;
+/** Longer when there's an Undo, so there's time to notice a wrong tap or swipe. */
+const ACTION_VISIBLE_MS = 8000;
 
 /** One toast at a time, Gmail-style: a new one replaces the old. */
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -25,7 +27,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!toast) return;
-    const timer = setTimeout(() => setToast(null), VISIBLE_MS);
+    const timer = setTimeout(() => setToast(null), toast.onAction ? ACTION_VISIBLE_MS : VISIBLE_MS);
     return () => clearTimeout(timer);
   }, [toast]);
 

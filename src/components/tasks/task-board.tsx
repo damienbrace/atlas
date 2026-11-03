@@ -8,6 +8,7 @@ import { addDays } from "@/lib/life/days";
 import { REPEAT_LABELS } from "@/lib/life/task-rules";
 import type { Task } from "@/lib/life/tasks";
 import type { TaskDraft } from "./task-dialog";
+import { SwipeRow } from "./swipe-row";
 import { AreaChip, DueChip } from "./task-parts";
 
 // The Tasks page as a board: To do, Doing, Done. On a computer cards drag between
@@ -169,7 +170,9 @@ function TaskCard({ task: t, column, today, dragging, onDragStart, onDragEnd, on
   const meta = !t.done && (t.dueDay || t.area || t.repeat || t.threadId || t.notes);
 
   return (
-    <li
+    <SwipeRow
+      enabled={!t.done}
+      onSwipe={() => onToggle(t)}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
@@ -227,6 +230,6 @@ function TaskCard({ task: t, column, today, dragging, onDragStart, onDragEnd, on
           )}
         </div>
       )}
-    </li>
+    </SwipeRow>
   );
 }

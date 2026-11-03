@@ -34,6 +34,7 @@ import {
 } from "@/lib/life/task-rules";
 import type { TaskSuggestion } from "@/lib/life/task-suggestions";
 import type { Task } from "@/lib/life/tasks";
+import { SwipeRow } from "./swipe-row";
 import { boardColumn, TaskBoard, type BoardColumn } from "./task-board";
 import { TaskDialog, type TaskDraft } from "./task-dialog";
 import { AreaChip, DueChip, quickDays } from "./task-parts";
@@ -119,12 +120,16 @@ export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, to
       flip(task.done);
       return toast({ message: "Couldn't update that task" });
     }
-    if (res.next) {
-      replace(res.next);
-      const due = `Next one due ${res.next.dueDay === today ? "today" : shortDay(res.next.dueDay!)}`;
-      toast({ message: waitingToShow(res.next, today) ? `${due}. It'll show ${showLabel(res.next.showDays).toLowerCase()}.` : due });
-    }
+    if (res.next) replace(res.next);
     if (res.removedId) setTasks((all) => all.filter((t) => t.id !== res.removedId));
+    if (task.done) return;
+    // Ticked off (tapped or swiped): say which, with Undo in case it was the wrong one.
+    let message = `Ticked off "${task.title.length > 32 ? `${task.title.slice(0, 30).trimEnd()}…` : task.title}"`;
+    if (res.next) {
+      message = `Ticked off. Next one due ${res.next.dueDay === today ? "today" : shortDay(res.next.dueDay!)}`;
+      if (waitingToShow(res.next, today)) message += `, showing ${showLabel(res.next.showDays).toLowerCase()}`;
+    }
+    toast({ message, onAction: () => void toggle({ ...task, done: true, doneAt: Date.now() }) });
   }
 
   /** A move on the board. Into Done is a tick; out of Done unticks it too. */
@@ -441,7 +446,12 @@ interface TaskRowProps {
 
 function TaskRow({ task: t, today, onToggle, onOpen, onSnooze, onChange, onDelete }: TaskRowProps) {
   return (
-    <li className="group flex items-start gap-1 rounded-xl hover:bg-white/[0.03]">
+    <SwipeRow
+      enabled={!t.done}
+      onSwipe={() => onToggle(t)}
+      backdrop="bg-panel"
+      className="group flex items-start gap-1 rounded-xl hover:bg-white/[0.03]"
+    >
       <button
         type="button"
         aria-label={t.done ? `Mark "${t.title}" not done` : `Tick off "${t.title}"`}
@@ -487,7 +497,7 @@ function TaskRow({ task: t, today, onToggle, onOpen, onSnooze, onChange, onDelet
           ]}
         />
       )}
-    </li>
+    </SwipeRow>
   );
 }
 
