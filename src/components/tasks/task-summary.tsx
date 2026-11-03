@@ -7,6 +7,7 @@ import { Dialog } from "@/components/dialog";
 import { iconButtonClass } from "@/components/icon-button";
 import { Sparkle } from "@/components/sparkle";
 import { useToast } from "@/components/toast";
+import { gmailAppUrl, isAndroid } from "@/lib/gmail/links";
 import { dayKey, shortDay } from "@/lib/life/days";
 import { REPEAT_LABELS } from "@/lib/life/task-rules";
 import type { HelpResult, StoredBrief } from "@/lib/life/task-brief";
@@ -35,6 +36,15 @@ interface TaskSummaryProps {
 const button =
   "flex h-10 items-center gap-1.5 rounded-xl border border-line-strong px-3.5 text-[14px] text-ink-soft hover:border-faint hover:text-ink disabled:opacity-40";
 const heading = "text-[12.5px] font-semibold tracking-wide text-faint uppercase";
+
+/** Gmail links open the Gmail app on an Android phone, and a new tab anywhere else. */
+const gmailLinkProps = (url: string) =>
+  isAndroid() ? { href: gmailAppUrl(url) } : { href: url, target: "_blank", rel: "noopener noreferrer" };
+
+const openGmail = (url: string) => {
+  if (isAndroid()) window.location.href = gmailAppUrl(url);
+  else window.open(url, "_blank", "noopener");
+};
 
 const fetched = (res: Awaited<ReturnType<typeof loadTaskBrief>>): Load =>
   res.ok ? { state: "ready", brief: res.brief, results: res.results } : { state: "failed", error: res.error };
@@ -209,9 +219,7 @@ function Brief({
         </div>
         {brief.email && (
           <a
-            href={brief.email.url}
-            target="_blank"
-            rel="noopener noreferrer"
+            {...gmailLinkProps(brief.email.url)}
             className="mt-3 flex items-center gap-3 rounded-xl border border-line-strong bg-panel px-3 py-2.5 hover:border-faint"
           >
             <Mail className="size-5 shrink-0 text-ink-soft" />
@@ -334,7 +342,7 @@ function HelpPanel({
     setBusy(false);
     if (!res.ok) return toast({ message: res.error });
     setDraftUrl(res.url);
-    toast({ message: "Saved to your Gmail drafts", actionLabel: "Open", onAction: () => window.open(res.url, "_blank", "noopener") });
+    toast({ message: "Saved to your Gmail drafts", actionLabel: "Open", onAction: () => openGmail(res.url) });
   }
 
   async function addToNotes() {
@@ -373,7 +381,7 @@ function HelpPanel({
         />
       </div>
       {draftUrl && (
-        <a href={draftUrl} target="_blank" rel="noopener noreferrer" className="mt-2 flex items-center gap-1.5 text-[13.5px] text-teal hover:underline">
+        <a {...gmailLinkProps(draftUrl)} className="mt-2 flex items-center gap-1.5 text-[13.5px] text-teal hover:underline">
           Saved. Open it in Gmail to check and send <ExternalLink className="size-3.5" />
         </a>
       )}
