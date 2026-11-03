@@ -32,6 +32,7 @@ import {
   type TaskGroup,
   type TaskView,
 } from "@/lib/life/task-rules";
+import type { StoredBrief } from "@/lib/life/task-brief";
 import type { TaskSuggestion } from "@/lib/life/task-suggestions";
 import type { Task } from "@/lib/life/tasks";
 import { SwipeRow } from "./swipe-row";
@@ -75,14 +76,17 @@ type Editing =
 interface TasksProps {
   tasks: Task[];
   suggestions: TaskSuggestion[];
+  /** Atlas's summaries already written, by task id, so tapping a task opens without a wait. */
+  briefs: Record<string, StoredBrief>;
   today: string;
   view: TaskView;
 }
 
-export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, today, view: initialView }: TasksProps) {
+export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, briefs: initialBriefs, today, view: initialView }: TasksProps) {
   const toast = useToast();
   const [view, setView] = useState(initialView);
   const [tasks, setTasks] = useState(initialTasks);
+  const [briefs, setBriefs] = useState(initialBriefs);
   const [suggestions, setSuggestions] = useState(initialSuggestions);
   const [area, setArea] = useState<TaskArea | null>(null);
   const [query, setQuery] = useState("");
@@ -408,7 +412,10 @@ export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, to
 
       {summaryTask && (
         <TaskSummary
+          key={summaryTask.id}
           task={summaryTask}
+          initial={briefs[summaryTask.id]}
+          onLoaded={(data) => setBriefs((all) => ({ ...all, [summaryTask.id]: data }))}
           today={today}
           onClose={() => setEditing(null)}
           onEdit={() => setEditing({ kind: "task", task: summaryTask })}

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isHermesRequest } from "@/lib/hermes";
 import { isDayKey } from "@/lib/life/days";
+import { fillBriefsLater } from "@/lib/life/task-brief";
 import { TASK_AREAS, REPEATS } from "@/lib/life/task-rules";
 import { addTask, dueOpenTasks, listTasks, searchTasks } from "@/lib/life/tasks";
 
@@ -14,6 +15,8 @@ import { addTask, dueOpenTasks, listTasks, searchTasks } from "@/lib/life/tasks"
 // POST {title, dueDay?, area?, priority?, notes?, repeat?, showDays?}
 //      showDays: keep it off the Tasks page until this many days before due (null = always;
 //      left out, repeating tasks get 14). Each task carries showDays in the GET results.
+
+export const maxDuration = 60;
 
 const unauthorized = () => Response.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -62,5 +65,7 @@ export async function POST(request: Request) {
     threadId: null,
     source: "hermes",
   });
+  // So the task's summary is ready by the time it's tapped.
+  fillBriefsLater();
   return Response.json({ task }, { status: 201 });
 }

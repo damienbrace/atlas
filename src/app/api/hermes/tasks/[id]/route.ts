@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { isHermesRequest } from "@/lib/hermes";
 import { isDayKey } from "@/lib/life/days";
+import { fillBriefsLater } from "@/lib/life/task-brief";
 import { REPEATS, TASK_AREAS } from "@/lib/life/task-rules";
 import { deleteTask, setTaskDone, updateTask, type TaskChange } from "@/lib/life/tasks";
 
@@ -9,6 +10,8 @@ import { deleteTask, setTaskDone, updateTask, type TaskChange } from "@/lib/life
 // (ticking a repeating task makes the next one, same as in the app). DELETE removes it.
 
 const ID = /^[0-9a-f-]{36}$/i;
+export const maxDuration = 60;
+
 const unauthorized = () => Response.json({ error: "Unauthorized" }, { status: 401 });
 
 const Change = z.object({
@@ -31,6 +34,7 @@ export async function PATCH(request: NextRequest, ctx: RouteContext<"/api/hermes
   const { done, ...rest } = parsed.data;
   const change = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined)) as TaskChange;
   const task = Object.keys(change).length ? await updateTask(id, change) : null;
+  if (task && change.title) fillBriefsLater();
   const ticked = done === undefined ? null : await setTaskDone(id, done);
   return Response.json({ ok: true, task, next: ticked?.next ?? null });
 }

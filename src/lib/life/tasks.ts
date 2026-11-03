@@ -71,6 +71,12 @@ export async function getTask(id: string) {
   return row ? toTask(row) : null;
 }
 
+export async function getTasks(ids: string[]) {
+  if (ids.length === 0) return [];
+  const rows = await sql<Row[]>`SELECT * FROM tasks WHERE id = ANY (${textList(ids)}) AND deleted_at IS NULL`;
+  return rows.map(toTask);
+}
+
 /**
  * The Brief's few: overdue, today and the next `days` days, priority first. Ones ticked
  * today stay (struck through) so a tick doesn't make them vanish mid-glance.

@@ -8,6 +8,7 @@ import { listHabits, setDone } from "@/lib/life/habits";
 import { appendToEntry } from "@/lib/life/journal";
 import { NOTE_TAGS, type NoteTag } from "@/lib/life/notes";
 import { isTaskArea } from "@/lib/life/task-rules";
+import { fillBriefsLater } from "@/lib/life/task-brief";
 import { addTask } from "@/lib/life/tasks";
 
 // Voice capture: Atlas turns what you said into suggested items; nothing is saved
@@ -81,6 +82,7 @@ export async function saveCaptureItem(item: CaptureSuggestion, today: string) {
         threadId: null,
         source: "voice",
       });
+      fillBriefsLater();
       return { ok: true as const };
     case "note":
       // The Notes page is gone (notes live in Obsidian now), so keep the info in today's journal.

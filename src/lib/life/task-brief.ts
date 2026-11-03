@@ -1,12 +1,16 @@
 import "server-only";
+import { after } from "next/server";
 import { briefTask, writeTaskHelp, type HelpKind, type TaskBriefText } from "@/lib/ai/claude";
 import { getGoogleAccount } from "@/lib/auth/account";
-import { sql } from "@/lib/db";
+import { sql, textList } from "@/lib/db";
+import { aiConfigured } from "@/lib/env";
 import { GmailClient, GmailHttpError, type GmailMessage, type GmailThread } from "@/lib/gmail/client";
 import { gmailDraftUrl, gmailThreadUrl } from "@/lib/gmail/links";
 import { COMPOSE_SCOPE } from "@/lib/gmail/oauth";
 import { parseThread, type ParsedThread } from "@/lib/gmail/parse";
-import type { Task } from "./tasks";
+import { dayKey } from "./days";
+import { waitingToShow } from "./task-rules";
+import { getTasks, type Task } from "./tasks";
 
 // The summary behind a tapped task: Atlas's read of it and of the email it came from,
 // written once per task and kept, plus anything Atlas has written to help get it done.
@@ -93,11 +97,65 @@ async function store(taskId: string, data: StoredBrief) {
     ON CONFLICT (task_id) DO UPDATE SET data = EXCLUDED.data`;
 }
 
+// Summaries being written in this server right now, so a tap during a background write
+// waits for it instead of paying for a second one.
+const writing = new Map<string, Promise<StoredBrief>>();
+
 /** The kept summary, or a fresh one when there's none yet, the title changed, or `refresh` asks for it. */
 export async function taskBrief(task: Task, refresh: boolean): Promise<StoredBrief> {
-  const kept = refresh ? null : await stored(task.id);
-  if (kept && kept.brief.title === task.title) return kept;
+  if (!refresh) {
+    const kept = await stored(task.id);
+    if (kept && kept.brief.title === task.title) return kept;
+    const pending = writing.get(task.id);
+    if (pending) return pending;
+  }
+  const job = writeBrief(task).finally(() => writing.delete(task.id));
+  writing.set(task.id, job);
+  return job;
+}
 
+/** Summaries already written for these tasks (and still for the same title), to send with the page. */
+export async function keptBriefs(tasks: Task[]): Promise<Record<string, StoredBrief>> {
+  if (tasks.length === 0) return {};
+  const rows = await sql<{ task_id: string; data: StoredBrief }[]>`
+    SELECT task_id, data FROM task_briefs WHERE task_id = ANY (${textList(tasks.map((t) => t.id))})`;
+  const titles = new Map(tasks.map((t) => [t.id, t.title]));
+  return Object.fromEntries(rows.filter((r) => r.data.brief.title === titles.get(r.task_id)).map((r) => [r.task_id, r.data]));
+}
+
+/** How many summaries are written side by side in the background. */
+const FILL_AT_ONCE = 3;
+
+/**
+ * Writes summaries ahead of time, newest task first, so tapping a task shows one straight
+ * away: open tasks with none yet, or renamed since. Tasks still hidden until closer to their
+ * date wait until they show. Run it with after(), so nobody waits on it.
+ */
+export async function fillBriefs({ limit = 6, budgetMs = 40_000 } = {}) {
+  if (!aiConfigured()) return;
+  const started = Date.now();
+  const rows = await sql<{ id: string }[]>`
+    SELECT t.id FROM tasks t LEFT JOIN task_briefs b ON b.task_id = t.id
+    WHERE t.deleted_at IS NULL AND t.done_at IS NULL
+      AND (b.task_id IS NULL OR b.data->'brief'->>'title' IS DISTINCT FROM t.title)
+    ORDER BY t.created_at DESC LIMIT ${limit * 3}`;
+  const today = dayKey(new Date());
+  const tasks = (await getTasks(rows.map((r) => r.id)))
+    .filter((t) => !waitingToShow(t, today))
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, limit);
+  for (let i = 0; i < tasks.length && Date.now() - started < budgetMs; i += FILL_AT_ONCE) {
+    const results = await Promise.allSettled(tasks.slice(i, i + FILL_AT_ONCE).map((t) => taskBrief(t, false)));
+    for (const r of results) if (r.status === "rejected") console.error("Couldn't write a task summary ahead", r.reason);
+  }
+}
+
+/** Writes missing summaries once the current response has gone out: after a task is added or renamed, or Tasks opens. */
+export function fillBriefsLater(limit = 3) {
+  after(() => fillBriefs({ limit }).catch((error) => console.error("Writing task summaries ahead", error)));
+}
+
+async function writeBrief(task: Task): Promise<StoredBrief> {
   const account = await getGoogleAccount();
   const raw = account
     ? await findEmail(task, new GmailClient(account.refreshToken)).catch((e) => {

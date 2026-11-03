@@ -8,7 +8,15 @@ import { GmailAuthExpiredError } from "@/lib/gmail/oauth";
 import type { Label } from "@/lib/inbox/types";
 import { isDayKey } from "@/lib/life/days";
 import { isRepeat, isShowDays, isTaskArea, type TaskArea } from "@/lib/life/task-rules";
-import { saveTaskDraft, TaskBriefError, taskBrief, taskHelp, type HelpResult, type StoredBrief } from "@/lib/life/task-brief";
+import {
+  fillBriefsLater,
+  saveTaskDraft,
+  TaskBriefError,
+  taskBrief,
+  taskHelp,
+  type HelpResult,
+  type StoredBrief,
+} from "@/lib/life/task-brief";
 import { getSuggestion, resolveSuggestion, resolveThread, suggestionsForThreads } from "@/lib/life/task-suggestions";
 import {
   addTask,
@@ -86,6 +94,7 @@ export async function createTask(input: TaskChange & { title: string }) {
     threadId: null,
     source: "manual",
   });
+  fillBriefsLater();
   return { ok: true as const, task };
 }
 
@@ -94,6 +103,7 @@ export async function editTask(id: string, input: TaskChange) {
   const change = cleanChange(input);
   if (!isId(id) || !change) return { ok: false as const };
   const task = await updateTask(id, change);
+  if (task && change.title) fillBriefsLater();
   return task ? { ok: true as const, task } : { ok: false as const };
 }
 
@@ -156,6 +166,7 @@ export async function approveSuggestion(key: string, input: TaskChange = {}) {
     source: "email",
   });
   await resolveSuggestion(key, "approved", task.id);
+  fillBriefsLater();
   return { ok: true as const, task };
 }
 
@@ -193,6 +204,7 @@ export async function makeTaskFromEmail(threadId: string) {
     source: "email",
   });
   await resolveThread(threadId, task.id);
+  fillBriefsLater();
   return { ok: true as const, task };
 }
 

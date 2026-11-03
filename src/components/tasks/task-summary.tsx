@@ -7,6 +7,7 @@ import { Dialog } from "@/components/dialog";
 import { iconButtonClass } from "@/components/icon-button";
 import { Sparkle } from "@/components/sparkle";
 import { useToast } from "@/components/toast";
+import { dayKey, shortDay } from "@/lib/life/days";
 import { REPEAT_LABELS } from "@/lib/life/task-rules";
 import type { HelpResult, StoredBrief } from "@/lib/life/task-brief";
 import type { Task } from "@/lib/life/tasks";
@@ -20,6 +21,9 @@ type Load = { state: "loading" } | { state: "failed"; error: string } | ({ state
 
 interface TaskSummaryProps {
   task: Task;
+  /** The summary sent with the page, if Atlas had already written it. */
+  initial?: StoredBrief;
+  onLoaded: (data: StoredBrief) => void;
   today: string;
   onClose: () => void;
   onEdit: () => void;
@@ -36,25 +40,36 @@ const fetched = (res: Awaited<ReturnType<typeof loadTaskBrief>>): Load =>
   res.ok ? { state: "ready", brief: res.brief, results: res.results } : { state: "failed", error: res.error };
 const OFFLINE: Load = { state: "failed", error: "Couldn't reach Atlas. Check your connection and try again." };
 
-export function TaskSummary({ task: t, today, onClose, onEdit, onToggle, onStart, onAddNotes }: TaskSummaryProps) {
-  const [load, setLoad] = useState<Load>({ state: "loading" });
+export function TaskSummary({ task: t, initial, onLoaded, today, onClose, onEdit, onToggle, onStart, onAddNotes }: TaskSummaryProps) {
+  // A summary sent with the page shows at once, then a quick check picks up anything newer
+  // (help written on another device). Without one, Atlas writes it now.
+  const [load, setLoad] = useState<Load>(initial ? { state: "ready", ...initial } : { state: "loading" });
+  const [hadInitial] = useState(Boolean(initial));
 
-  // Written once per task and kept; a fresh one comes from the refresh button.
   useEffect(() => {
     let live = true;
     void loadTaskBrief(t.id).then(
-      (res) => live && setLoad(fetched(res)),
-      () => live && setLoad(OFFLINE),
+      (res) => {
+        if (!live) return;
+        if (res.ok) onLoaded({ brief: res.brief, results: res.results });
+        if (res.ok || !hadInitial) setLoad(fetched(res));
+      },
+      () => live && !hadInitial && setLoad(OFFLINE),
     );
     return () => {
       live = false;
     };
+    // Once per opening; onLoaded only stores what came back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t.id]);
 
   function rewrite() {
     setLoad({ state: "loading" });
     void loadTaskBrief(t.id, true).then(
-      (res) => setLoad(fetched(res)),
+      (res) => {
+        if (res.ok) onLoaded({ brief: res.brief, results: res.results });
+        setLoad(fetched(res));
+      },
       () => setLoad(OFFLINE),
     );
   }
@@ -129,7 +144,16 @@ export function TaskSummary({ task: t, today, onClose, onEdit, onToggle, onStart
           </section>
         )}
 
-        {load.state === "ready" && <Brief task={t} data={load} onRewrite={rewrite} onAddNotes={onAddNotes} />}
+        {load.state === "ready" && (
+          <Brief
+            // A fresh summary, or help written elsewhere, starts the panel afresh.
+            key={`${load.brief.createdAt}:${Object.keys(load.results).length}`}
+            task={t}
+            data={load}
+            onRewrite={rewrite}
+            onAddNotes={onAddNotes}
+          />
+        )}
 
         {t.notes.trim() && (
           <section>
@@ -188,13 +212,16 @@ function Brief({
             href={brief.email.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-2 flex items-center gap-1.5 text-[13px] text-muted hover:text-ink"
+            className="mt-3 flex items-center gap-3 rounded-xl border border-line-strong bg-panel px-3 py-2.5 hover:border-faint"
           >
-            <Mail className="size-3.5 shrink-0" />
-            <span className="truncate">
-              {brief.email.from} · {brief.email.subject}
+            <Mail className="size-5 shrink-0 text-ink-soft" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[14.5px] font-semibold">Open the email in Gmail</span>
+              <span className="block truncate text-[12.5px] text-muted">
+                {brief.email.from} · {shortDay(dayKey(new Date(brief.email.date)))} · {brief.email.subject}
+              </span>
             </span>
-            <ExternalLink className="size-3.5 shrink-0" />
+            <ExternalLink className="size-4 shrink-0 text-muted" />
           </a>
         )}
 
