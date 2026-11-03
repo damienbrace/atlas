@@ -1,11 +1,27 @@
 "use server";
 
+import { describeAiError } from "@/lib/ai/claude";
 import { signedIn } from "@/lib/auth/session";
+import { aiConfigured } from "@/lib/env";
+import { GmailHttpError } from "@/lib/gmail/client";
+import { GmailAuthExpiredError } from "@/lib/gmail/oauth";
 import type { Label } from "@/lib/inbox/types";
 import { isDayKey } from "@/lib/life/days";
 import { isRepeat, isShowDays, isTaskArea, type TaskArea } from "@/lib/life/task-rules";
+import { saveTaskDraft, TaskBriefError, taskBrief, taskHelp, type HelpResult, type StoredBrief } from "@/lib/life/task-brief";
 import { getSuggestion, resolveSuggestion, resolveThread, suggestionsForThreads } from "@/lib/life/task-suggestions";
-import { addTask, deleteTask, restoreTask, searchTasks, setTaskDone, setTaskStarted, updateTask, type Task, type TaskChange } from "@/lib/life/tasks";
+import {
+  addTask,
+  deleteTask,
+  getTask,
+  restoreTask,
+  searchTasks,
+  setTaskDone,
+  setTaskStarted,
+  updateTask,
+  type Task,
+  type TaskChange,
+} from "@/lib/life/tasks";
 import { getThread } from "@/lib/mail/db";
 import { triageKey } from "@/lib/mail/sync";
 import { annotationsFor } from "@/lib/store";
@@ -178,4 +194,75 @@ export async function makeTaskFromEmail(threadId: string) {
   });
   await resolveThread(threadId, task.id);
   return { ok: true as const, task };
+}
+
+type Failed = { ok: false; error: string };
+
+/** Something to show when a task's summary or help can't be done. */
+function failure(error: unknown): Failed {
+  console.error("Task summary failed", error);
+  if (error instanceof TaskBriefError) return { ok: false, error: error.message };
+  if (error instanceof GmailAuthExpiredError) return { ok: false, error: "Google sign-in has expired. Sign out and back in." };
+  if (error instanceof GmailHttpError) return { ok: false, error: "Gmail didn't take that. Try again shortly." };
+  return { ok: false, error: describeAiError(error) };
+}
+
+async function taskFor(id: unknown): Promise<Task | Failed> {
+  if (!(await signedIn())) return { ok: false, error: "Sign in again." };
+  if (!isId(id)) return { ok: false, error: "That task isn't valid." };
+  if (!aiConfigured()) return { ok: false, error: "Add an Anthropic API key to get Atlas's summaries." };
+  return (await getTask(id)) ?? { ok: false, error: "That task has been deleted." };
+}
+
+/** Atlas's summary of a task: what it's about, what to do, and what Atlas can write for it. Kept after the first time. */
+export async function loadTaskBrief(id: string, refresh = false): Promise<({ ok: true } & StoredBrief) | Failed> {
+  const task = await taskFor(id);
+  if ("ok" in task) return task;
+  try {
+    return { ok: true, ...(await taskBrief(task, refresh === true)) };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+/** Has Atlas write one of the summary's help options. Nothing is sent. */
+export async function runTaskHelp(id: string, index: number): Promise<{ ok: true; result: HelpResult } | Failed> {
+  const task = await taskFor(id);
+  if ("ok" in task) return task;
+  if (!Number.isInteger(index) || index < 0 || index > 5) return { ok: false, error: "That option isn't valid." };
+  try {
+    const result = await taskHelp(task, index);
+    return result ? { ok: true, result } : { ok: false, error: "Open the task again to get fresh options." };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+const isAddress = (value: string) => value === "" || /^[^\s@<>,;"]+@[^\s@<>,;"]+$/.test(value);
+
+/** Saves an email Atlas wrote (after any edits) into Gmail's drafts, to check and send from there. */
+export async function saveHelpDraft(
+  id: string,
+  draft: { kind: "reply" | "email"; to: string; subject: string; body: string },
+): Promise<{ ok: true; url: string } | Failed> {
+  const task = await taskFor(id);
+  if ("ok" in task) return task;
+  const { kind, to, subject, body } = draft ?? {};
+  if (
+    (kind !== "reply" && kind !== "email") ||
+    typeof to !== "string" ||
+    typeof subject !== "string" ||
+    typeof body !== "string" ||
+    !isAddress(to.trim()) ||
+    subject.length > 300 ||
+    !body.trim() ||
+    body.length > 20_000
+  ) {
+    return { ok: false, error: "Check the address, subject and message." };
+  }
+  try {
+    return { ok: true, url: await saveTaskDraft(task, { kind, to: to.trim(), subject, body }) };
+  } catch (error) {
+    return failure(error);
+  }
 }

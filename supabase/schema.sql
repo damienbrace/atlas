@@ -58,6 +58,14 @@ alter table tasks add column if not exists started_at bigint;          -- moved 
 alter table tasks add column if not exists show_days integer;          -- on the Tasks page only this many days before due; null = always
 create index if not exists tasks_due on tasks (due_day) where done_at is null and deleted_at is null;
 
+-- Atlas's summary of a task (and the email it came from), written the first time it's
+-- opened, plus anything Atlas wrote from it. See src/lib/life/task-brief.ts.
+create table if not exists task_briefs (
+  task_id text primary key,
+  data jsonb not null,
+  created_at bigint not null
+);
+
 -- Tasks Atlas spotted while sorting email, waiting for Approve / Edit / Dismiss.
 -- Keyed like triage, so a dismissed suggestion never comes back for that email.
 create table if not exists task_suggestions (
@@ -238,6 +246,7 @@ alter table overrides enable row level security;
 alter table google_account enable row level security;
 alter table push_subscriptions enable row level security;
 alter table task_suggestions enable row level security;
+alter table task_briefs enable row level security;
 alter table money_transactions enable row level security;
 alter table money_merchants enable row level security;
 alter table money_rules enable row level security;

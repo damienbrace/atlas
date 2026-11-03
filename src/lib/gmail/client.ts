@@ -91,6 +91,30 @@ export class GmailClient {
     throw new GmailHttpError(res.status, reason, path.split("?")[0]);
   }
 
+  private async post<T>(path: string, body: unknown, attempt = 0): Promise<T> {
+    const token = await accessTokenFor(this.refreshToken);
+    const res = await fetch(`${API}${path}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+    if (res.ok) return res.json() as Promise<T>;
+    if (res.status === 401 && attempt === 0) {
+      forgetAccessToken(this.refreshToken);
+      return this.post(path, body, attempt + 1);
+    }
+    const reason = await res.json().then((b) => b?.error?.errors?.[0]?.reason ?? b?.error?.status ?? "", () => "");
+    throw new GmailHttpError(res.status, reason, path.split("?")[0]);
+  }
+
+  /** Saves a draft to send from Gmail; nothing is sent (needs gmail.compose). `raw` is the whole RFC 2822 message, base64url. */
+  async createDraft(raw: string, threadId?: string) {
+    return this.post<{ id: string; message: { id: string; threadId: string } }>("/drafts", {
+      message: threadId ? { raw, threadId } : { raw },
+    });
+  }
+
   async profile() {
     return this.get<{ emailAddress: string; historyId: string }>("/profile");
   }

@@ -37,6 +37,7 @@ import type { Task } from "@/lib/life/tasks";
 import { SwipeRow } from "./swipe-row";
 import { boardColumn, TaskBoard, type BoardColumn } from "./task-board";
 import { TaskDialog, type TaskDraft } from "./task-dialog";
+import { TaskSummary } from "./task-summary";
 import { AreaChip, DueChip, quickDays } from "./task-parts";
 
 // The Tasks page: everything to do, grouped by when (or on a To do / Doing / Done
@@ -65,7 +66,11 @@ const toDraft = (t: Task): TaskDraft => ({
   showDays: t.showDays,
 });
 
-type Editing = { kind: "task"; task: Task } | { kind: "suggestion"; suggestion: TaskSuggestion } | null;
+type Editing =
+  | { kind: "summary"; task: Task }
+  | { kind: "task"; task: Task }
+  | { kind: "suggestion"; suggestion: TaskSuggestion }
+  | null;
 
 interface TasksProps {
   tasks: Task[];
@@ -195,7 +200,17 @@ export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, to
     }
   }
 
-  const rowProps = { today, onToggle: toggle, onOpen: (task: Task) => setEditing({ kind: "task", task }), onSnooze: snooze, onChange: change, onDelete: remove };
+  const rowProps = {
+    today,
+    onToggle: toggle,
+    onOpen: (task: Task) => setEditing({ kind: "summary", task }),
+    onEdit: (task: Task) => setEditing({ kind: "task", task }),
+    onSnooze: snooze,
+    onChange: change,
+    onDelete: remove,
+  };
+  // The summary follows the task as it changes (started, ticked, notes added).
+  const summaryTask = editing?.kind === "summary" ? (tasks.find((t) => t.id === editing.task.id) ?? editing.task) : null;
   const searching = query.trim().length > 0;
 
   return (
@@ -391,6 +406,17 @@ export function Tasks({ tasks: initialTasks, suggestions: initialSuggestions, to
         )}
       </div>
 
+      {summaryTask && (
+        <TaskSummary
+          task={summaryTask}
+          today={today}
+          onClose={() => setEditing(null)}
+          onEdit={() => setEditing({ kind: "task", task: summaryTask })}
+          onToggle={toggle}
+          onStart={(task) => void move(task, "doing")}
+          onAddNotes={(task, text) => change(task, { notes: task.notes.trim() ? `${task.notes.trimEnd()}\n\n${text}` : text })}
+        />
+      )}
       {editing?.kind === "task" && (
         <TaskDialog
           mode="edit"
@@ -438,13 +464,15 @@ interface TaskRowProps {
   task: Task;
   today: string;
   onToggle: (task: Task) => void;
+  /** Opens Atlas's summary of the task. */
   onOpen: (task: Task) => void;
+  onEdit: (task: Task) => void;
   onSnooze: (task: Task, day: string) => void;
   onChange: (task: Task, change: Partial<TaskDraft>) => Promise<boolean>;
   onDelete: (task: Task) => void;
 }
 
-function TaskRow({ task: t, today, onToggle, onOpen, onSnooze, onChange, onDelete }: TaskRowProps) {
+function TaskRow({ task: t, today, onToggle, onOpen, onEdit, onSnooze, onChange, onDelete }: TaskRowProps) {
   return (
     <SwipeRow
       enabled={!t.done}
@@ -491,7 +519,8 @@ function TaskRow({ task: t, today, onToggle, onOpen, onSnooze, onChange, onDelet
           items={[
             { label: "Snooze to tomorrow", onSelect: () => onSnooze(t, addDays(today, 1)) },
             { label: "Snooze to next week", onSelect: () => onSnooze(t, addDays(today, 7)) },
-            { label: "Pick a date…", onSelect: () => onOpen(t) },
+            { label: "Pick a date…", onSelect: () => onEdit(t) },
+            { label: "Edit", onSelect: () => onEdit(t) },
             { label: t.priority ? "Remove flag" : "Flag as important", onSelect: () => void onChange(t, { priority: !t.priority }) },
             { label: "Delete", danger: true, onSelect: () => onDelete(t) },
           ]}

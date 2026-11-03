@@ -22,6 +22,7 @@ export interface Task {
   repeat: Repeat | null;
   /** Shown on the Tasks page only this many days before it's due; null = always. */
   showDays: number | null;
+  createdAt: number;
 }
 
 interface Row {
@@ -37,6 +38,7 @@ interface Row {
   repeat: string | null;
   next_id: string | null;
   show_days: number | null;
+  created_at: number;
 }
 
 const toTask = (r: Row): Task => ({
@@ -52,6 +54,7 @@ const toTask = (r: Row): Task => ({
   threadId: r.thread_id,
   repeat: isRepeat(r.repeat) ? r.repeat : null,
   showDays: r.show_days,
+  createdAt: r.created_at,
 });
 
 /** Open tasks, plus ones ticked off in the last `doneDays` days (the Done list). */
@@ -61,6 +64,11 @@ export async function listTasks(doneDays: number) {
     SELECT * FROM tasks WHERE deleted_at IS NULL AND (done_at IS NULL OR done_at >= ${doneSince})
     ORDER BY priority DESC, due_day IS NULL, due_day, created_at`;
   return rows.map(toTask);
+}
+
+export async function getTask(id: string) {
+  const [row] = await sql<Row[]>`SELECT * FROM tasks WHERE id = ${id} AND deleted_at IS NULL`;
+  return row ? toTask(row) : null;
 }
 
 /**

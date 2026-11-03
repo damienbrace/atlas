@@ -38,7 +38,9 @@ interface TaskBoardProps {
   today: string;
   onMove: (task: Task, to: BoardColumn) => void;
   onToggle: (task: Task) => void;
+  /** Opens Atlas's summary of the task. */
   onOpen: (task: Task) => void;
+  onEdit: (task: Task) => void;
   onSnooze: (task: Task, day: string) => void;
   onChange: (task: Task, change: Partial<TaskDraft>) => Promise<boolean>;
   onDelete: (task: Task) => void;
@@ -153,7 +155,21 @@ interface TaskCardProps extends Omit<TaskBoardProps, "open" | "done"> {
   onDragEnd: () => void;
 }
 
-function TaskCard({ task: t, column, today, dragging, onDragStart, onDragEnd, onMove, onToggle, onOpen, onSnooze, onChange, onDelete }: TaskCardProps) {
+function TaskCard({
+  task: t,
+  column,
+  today,
+  dragging,
+  onDragStart,
+  onDragEnd,
+  onMove,
+  onToggle,
+  onOpen,
+  onEdit,
+  onSnooze,
+  onChange,
+  onDelete,
+}: TaskCardProps) {
   const moves: MenuItem[] = (["todo", "doing", "done"] as const)
     .filter((to) => to !== column)
     .map((to) => ({ label: `Move to ${COLUMN_LABELS[to]}`, onSelect: () => onMove(t, to) }));
@@ -163,7 +179,8 @@ function TaskCard({ task: t, column, today, dragging, onDragStart, onDragEnd, on
         ...moves,
         { label: "Snooze to tomorrow", onSelect: () => onSnooze(t, addDays(today, 1)) },
         { label: "Snooze to next week", onSelect: () => onSnooze(t, addDays(today, 7)) },
-        { label: "Pick a date…", onSelect: () => onOpen(t) },
+        { label: "Pick a date…", onSelect: () => onEdit(t) },
+        { label: "Edit", onSelect: () => onEdit(t) },
         { label: t.priority ? "Remove flag" : "Flag as important", onSelect: () => void onChange(t, { priority: !t.priority }) },
         { label: "Delete", danger: true, onSelect: () => onDelete(t) },
       ];
